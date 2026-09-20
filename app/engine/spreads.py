@@ -75,7 +75,10 @@ def _find_leg_near_strike(legs: list[OptionLeg], strike: float) -> OptionLeg | N
     return min(legs, key=lambda leg: abs(leg.strike - strike))
 
 
-def _atm_iv(chain: OptionsChain, spot: float) -> float | None:
+def atm_iv(chain: OptionsChain, spot: float) -> float | None:
+    """Average of the nearest-the-money call/put implied vol. Public so
+    prediction.py can reuse it for an IV-implied expected-move estimate,
+    independent of the directional signal score."""
     call = _find_leg_near_strike(chain.calls, spot)
     put = _find_leg_near_strike(chain.puts, spot)
     ivs = [leg.implied_vol for leg in (call, put) if leg and leg.implied_vol]
@@ -365,8 +368,8 @@ def build_trade_card(
 
     # Not directionally tradeable -- check for an iron-condor (range-bound) setup.
     range_score = range_bound_score(verdict.signals)
-    atm_iv = _atm_iv(chain, spot)
-    if not verdict.hard_block and range_score >= CONDOR_RANGE_SCORE_THRESHOLD and atm_iv and atm_iv >= CONDOR_MIN_IV:
+    iv_level = atm_iv(chain, spot)
+    if not verdict.hard_block and range_score >= CONDOR_RANGE_SCORE_THRESHOLD and iv_level and iv_level >= CONDOR_MIN_IV:
         try:
             card = _iron_condor_card(ratio, chain, spot, t_years, range_score)
         except ValueError:

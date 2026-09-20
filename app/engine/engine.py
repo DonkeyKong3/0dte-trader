@@ -25,10 +25,19 @@ from app.data.market_data import (
 )
 from app.engine import signals as sig
 from app.engine.confidence import evaluate
-from app.engine.prediction import LABELS as PREDICTION_LABELS, bucket_side, classify_realized_move, predict_movement
+from app.engine.prediction import (
+    LABELS as PREDICTION_LABELS,
+    atr_expected_move_pct,
+    bucket_side,
+    classify_realized_move,
+    iv_expected_move_pct,
+    predict_movement,
+)
 from app.engine.spreads import build_trade_card
 
 log = logging.getLogger(__name__)
+
+PREDICTION_HORIZON_YEARS = (PREDICTION_HORIZON_MINUTES * 60) / (365 * 24 * 3600)
 
 
 def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: float | None, now: dt.datetime) -> dict:
@@ -42,7 +51,16 @@ def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: f
 
     verdict = evaluate(signal_list, now)
     card = build_trade_card(verdict, chain, ratio, now)
-    prediction = predict_movement(signal_list)
+
+    # Magnitude evidence for the prediction, independent of the directional
+    # signal vote: prefer the options market's own IV-implied expected move,
+    # fall back to realized ATR when there's no usable chain.
+    expected_move_pct = iv_expected_move_pct(chain, quote_price, PREDICTION_HORIZON_YEARS)
+    magnitude_source = "iv"
+    if expected_move_pct is None:
+        expected_move_pct = atr_expected_move_pct(bars, quote_price, PREDICTION_HORIZON_MINUTES)
+        magnitude_source = "atr" if expected_move_pct is not None else "none"
+    prediction = predict_movement(signal_list, expected_move_pct, magnitude_source)
 
     spx_estimate = quote_price * ratio if ratio else None
     card_dict = dataclasses.asdict(card) if card else None
@@ -66,6 +84,8 @@ def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: f
             "label": PREDICTION_LABELS[prediction.bucket],
             "confidence": prediction.confidence,
             "net_score": prediction.net_score,
+            "expected_move_pct": prediction.expected_move_pct,
+            "magnitude_source": prediction.magnitude_source,
         },
     }
 
@@ -104,6 +124,8 @@ def run_cycle(now: dt.datetime | None = None) -> dict:
         predicted_bucket=result["prediction"]["bucket"],
         predicted_confidence=result["prediction"]["confidence"],
         predicted_net_score=result["prediction"]["net_score"],
+        predicted_expected_move_pct=result["prediction"]["expected_move_pct"],
+        predicted_magnitude_source=result["prediction"]["magnitude_source"],
         prediction_resolve_by=prediction_resolve_by,
         now=now,
     )

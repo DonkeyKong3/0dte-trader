@@ -9,7 +9,30 @@ from contextlib import contextmanager
 
 from config import DB_PATH, TZ
 
-SCHEMA = """
+# Columns added to `signals` after its original v1 shape shipped. This is
+# the single source of truth for them: it drives BOTH the CREATE TABLE
+# below (fresh installs) AND the ALTER TABLE migration in init_db() (an
+# existing signals.db). CREATE TABLE IF NOT EXISTS is a no-op on a table
+# that already exists -- it does NOT add new columns -- so previously these
+# lived in two separate places that could drift out of sync; when they did,
+# every INSERT started failing with "no column named ..." on any existing
+# db, silently, since nothing in the request path surfaces that to the UI.
+_SIGNALS_EXTRA_COLUMNS = {
+    "predicted_bucket": "TEXT",
+    "predicted_confidence": "REAL",
+    "predicted_net_score": "REAL",
+    "predicted_expected_move_pct": "REAL",
+    "predicted_magnitude_source": "TEXT",
+    "prediction_resolve_by": "TEXT",
+    "prediction_resolved_at": "TEXT",
+    "realized_bucket": "TEXT",
+    "realized_pct_change": "REAL",
+    "prediction_correct": "INTEGER",
+    "prediction_direction_correct": "INTEGER",
+}
+_signals_extra_columns_sql = "".join(f",\n    {name} {sql_type}" for name, sql_type in _SIGNALS_EXTRA_COLUMNS.items())
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
@@ -20,16 +43,7 @@ CREATE TABLE IF NOT EXISTS signals (
     spy_price REAL,
     spx_estimate REAL,
     card_json TEXT,
-    reasons_json TEXT,
-    predicted_bucket TEXT,
-    predicted_confidence REAL,
-    predicted_net_score REAL,
-    prediction_resolve_by TEXT,
-    prediction_resolved_at TEXT,
-    realized_bucket TEXT,
-    realized_pct_change REAL,
-    prediction_correct INTEGER,
-    prediction_direction_correct INTEGER
+    reasons_json TEXT{_signals_extra_columns_sql}
 );
 
 CREATE TABLE IF NOT EXISTS trades (
@@ -76,29 +90,11 @@ def _conn():
         conn.close()
 
 
-# Columns added to `signals` after it first shipped. `CREATE TABLE IF NOT
-# EXISTS` is a no-op on a table that already exists -- it does NOT add new
-# columns -- so an existing signals.db from before these were added would
-# otherwise fail every INSERT with "no column named ...", silently, since
-# nothing surfaces that error to the UI (the frontend just sees no new row).
-_SIGNALS_MIGRATIONS = {
-    "predicted_bucket": "TEXT",
-    "predicted_confidence": "REAL",
-    "predicted_net_score": "REAL",
-    "prediction_resolve_by": "TEXT",
-    "prediction_resolved_at": "TEXT",
-    "realized_bucket": "TEXT",
-    "realized_pct_change": "REAL",
-    "prediction_correct": "INTEGER",
-    "prediction_direction_correct": "INTEGER",
-}
-
-
 def init_db() -> None:
     with _conn() as conn:
         conn.executescript(SCHEMA)
         existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
-        for column, sql_type in _SIGNALS_MIGRATIONS.items():
+        for column, sql_type in _SIGNALS_EXTRA_COLUMNS.items():
             if column not in existing_columns:
                 conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {sql_type}")
 
@@ -114,6 +110,8 @@ def record_cycle(
     predicted_bucket: str | None = None,
     predicted_confidence: float | None = None,
     predicted_net_score: float | None = None,
+    predicted_expected_move_pct: float | None = None,
+    predicted_magnitude_source: str | None = None,
     prediction_resolve_by: dt.datetime | None = None,
     now: dt.datetime | None = None,
 ) -> None:
@@ -122,8 +120,9 @@ def record_cycle(
         conn.execute(
             """INSERT INTO signals
                (timestamp, tradeable, direction, strategy, score, spy_price, spx_estimate, card_json, reasons_json,
-                predicted_bucket, predicted_confidence, predicted_net_score, prediction_resolve_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                predicted_bucket, predicted_confidence, predicted_net_score, predicted_expected_move_pct,
+                predicted_magnitude_source, prediction_resolve_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 now.isoformat(),
                 1 if tradeable else 0,
@@ -137,6 +136,8 @@ def record_cycle(
                 predicted_bucket,
                 predicted_confidence,
                 predicted_net_score,
+                predicted_expected_move_pct,
+                predicted_magnitude_source,
                 prediction_resolve_by.isoformat() if prediction_resolve_by else None,
             ),
         )

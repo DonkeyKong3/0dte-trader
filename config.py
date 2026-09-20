@@ -54,16 +54,22 @@ CONDOR_MIN_IV = 0.10                # minimum ATM annualized IV to bother sellin
 TARGET_SHORT_DELTA = 0.18           # standard 0DTE credit-spread short-leg delta
 
 # --- Predicted movement (always-on, separate from the trade-confidence gate) ---
-# Bucketed on the same weighted bullish-minus-bearish signal score (-100..100)
-# used for direction, not the trade CONFIDENCE_THRESHOLD -- these control how
-# that net score splits into 5 buckets: big_down/small_down/flat/small_up/big_up.
-PREDICTION_FLAT_THRESHOLD = 15   # |net score| below this -> "flat"
-PREDICTION_BIG_THRESHOLD = 55    # |net score| at/above this -> "big" instead of "small"
-# How far ahead a prediction is checked against actual SPY price movement.
+# Direction comes from the weighted bullish-minus-bearish signal score
+# (-100..100, same math as the trade-confidence gate, NOT the same as
+# CONFIDENCE_THRESHOLD). Magnitude (small vs big) is deliberately a
+# SEPARATE, independently-sourced read: the options market's own IV-implied
+# expected move for the horizon (or an ATR-based fallback), classified
+# against PREDICTION_BIG_MOVE_PCT below -- not derived from the signal
+# score, so direction confidence and magnitude don't collapse into the
+# same number.
+PREDICTION_FLAT_THRESHOLD = 15   # |net score| below this -> "flat" (no directional edge)
+# How far ahead a prediction is checked against actual SPY price movement,
+# and the horizon used for the IV/ATR-implied expected-move estimate.
 PREDICTION_HORIZON_MINUTES = 30
-# Realized-move thresholds (in %) used to classify what actually happened,
-# for scoring prediction accuracy -- independent of the signal-score
-# thresholds above since these compare against real price change.
+# Real-world % move thresholds -- used BOTH to classify the predicted
+# magnitude (IV/ATR-implied expected move vs. this bar) AND to classify
+# what actually happened for accuracy scoring, so "big" means the same
+# real-world thing on the predicting and the scoring side.
 PREDICTION_FLAT_MOVE_PCT = 0.05
 PREDICTION_BIG_MOVE_PCT = 0.30
 

@@ -55,10 +55,20 @@ function predictionHtml(prediction, hindsight) {
       </div>`;
   }
 
+  const sourceLabel = { iv: "options-implied (IV)", atr: "recent realized volatility (ATR)", none: "unavailable" }[
+    prediction.magnitude_source
+  ] || prediction.magnitude_source;
+  const moveHtml =
+    prediction.expected_move_pct != null
+      ? `<div class="status-sub" style="margin-top:2px">Expected move: <strong>&plusmn;${prediction.expected_move_pct.toFixed(2)}%</strong> <span class="sub">(${sourceLabel})</span></div>`
+      : "";
+
   return `
     <div class="section-title" style="margin-top:16px">Predicted movement</div>
     <div class="pred-row">${segments}</div>
-    <div class="status-sub" style="margin-top:6px">Predicted: <strong>${prediction.label}</strong> &middot; confidence ${prediction.confidence}%</div>
+    <div class="status-sub" style="margin-top:6px">Direction: <strong>${prediction.label}</strong> &middot; confidence ${prediction.confidence}%</div>
+    ${moveHtml}
+    <div class="sub" style="margin-top:2px">Direction from technical signals; size (small/big) from ${sourceLabel === "unavailable" ? "defaults to “small” (no volatility read available)" : sourceLabel} -- two independent reads, not the same number twice.</div>
     ${hindsightHtml}
   `;
 }

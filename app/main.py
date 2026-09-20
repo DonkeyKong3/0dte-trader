@@ -47,6 +47,8 @@ def _with_prediction(row: dict) -> dict:
             "label": PREDICTION_LABELS.get(bucket, bucket),
             "confidence": row.get("predicted_confidence"),
             "net_score": row.get("predicted_net_score"),
+            "expected_move_pct": row.get("predicted_expected_move_pct"),
+            "magnitude_source": row.get("predicted_magnitude_source"),
         }
         if bucket
         else None
