@@ -1,0 +1,181 @@
+"""Free-data market layer.
+
+We trade signals off SPY (free, liquid, near-real-time via Yahoo Finance)
+and translate them into SPX spread recommendations by scaling strikes with
+the *live* SPX/SPY ratio (it drifts, so we never hardcode ~10x).
+
+IMPORTANT: Yahoo Finance has no real-time SLA. Every payload here carries an
+`as_of` timestamp so the caller/UI can show data staleness explicitly.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import math
+from dataclasses import dataclass, field
+
+import pandas as pd
+import yfinance as yf
+
+from config import PROXY_TICKER, TARGET_TICKER, TZ
+
+
+@dataclass
+class Quote:
+    price: float
+    as_of: dt.datetime
+
+
+@dataclass
+class OptionLeg:
+    strike: float
+    bid: float
+    ask: float
+    last: float
+    volume: int
+    open_interest: int
+    implied_vol: float | None
+
+    @property
+    def mid(self) -> float:
+        if self.bid and self.ask and self.ask >= self.bid:
+            return round((self.bid + self.ask) / 2, 4)
+        return self.last
+
+
+@dataclass
+class OptionsChain:
+    expiration: str
+    underlying_price: float
+    calls: list[OptionLeg] = field(default_factory=list)
+    puts: list[OptionLeg] = field(default_factory=list)
+
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(TZ)
+
+
+def get_intraday_bars(ticker: str = PROXY_TICKER, period: str = "1d", interval: str = "1m") -> pd.DataFrame:
+    """1-minute OHLCV bars for the current session. Empty DataFrame on failure."""
+    try:
+        df = yf.Ticker(ticker).history(period=period, interval=interval, prepost=False)
+    except Exception:
+        return pd.DataFrame()
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df.index = df.index.tz_convert(TZ) if df.index.tz is not None else df.index.tz_localize(TZ)
+    return df
+
+
+def get_last_quote(ticker: str) -> Quote | None:
+    df = get_intraday_bars(ticker, period="1d", interval="1m")
+    if df.empty:
+        return None
+    last = df.iloc[-1]
+    return Quote(price=float(last["Close"]), as_of=df.index[-1].to_pydatetime())
+
+
+def get_spx_spy_ratio() -> float | None:
+    """Live SPX/SPY ratio, computed fresh (it drifts, roughly 10.5-10.9)."""
+    spx = get_last_quote(TARGET_TICKER)
+    spy = get_last_quote(PROXY_TICKER)
+    if not spx or not spy or spy.price == 0:
+        return None
+    return spx.price / spy.price
+
+
+def _todays_expiration(ticker: yf.Ticker) -> str | None:
+    today = _now().strftime("%Y-%m-%d")
+    try:
+        options = ticker.options
+    except Exception:
+        return None
+    if today in options:
+        return today
+    return None
+
+
+def get_0dte_options_chain(ticker_symbol: str = PROXY_TICKER) -> OptionsChain | None:
+    """Today's expiration chain for the proxy ticker, or None if SPY has no
+    same-day expiration today (SPY trades M/W/F 0DTE-eligible expirations;
+    Tue/Thu are the gap days -> caller should treat missing chain as
+    'no 0DTE signal available' rather than guessing)."""
+    t = yf.Ticker(ticker_symbol)
+    expiration = _todays_expiration(t)
+    if not expiration:
+        return None
+    try:
+        chain = t.option_chain(expiration)
+    except Exception:
+        return None
+    quote = get_last_quote(ticker_symbol)
+    underlying_price = quote.price if quote else float("nan")
+
+    def to_legs(df: pd.DataFrame) -> list[OptionLeg]:
+        legs = []
+        for _, row in df.iterrows():
+            legs.append(
+                OptionLeg(
+                    strike=float(row["strike"]),
+                    bid=float(row.get("bid") or 0.0),
+                    ask=float(row.get("ask") or 0.0),
+                    last=float(row.get("lastPrice") or 0.0),
+                    volume=int(row.get("volume") or 0),
+                    open_interest=int(row.get("openInterest") or 0),
+                    implied_vol=float(row["impliedVolatility"]) if pd.notna(row.get("impliedVolatility")) else None,
+                )
+            )
+        return legs
+
+    return OptionsChain(
+        expiration=expiration,
+        underlying_price=underlying_price,
+        calls=to_legs(chain.calls),
+        puts=to_legs(chain.puts),
+    )
+
+
+# --- Black-Scholes IV/greeks fallback (yfinance's impliedVolatility field can
+# be stale intraday, so we recompute from live mid price when possible). ---
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def _norm_pdf(x: float) -> float:
+    return math.exp(-0.5 * x * x) / math.sqrt(2 * math.pi)
+
+
+def bs_price(spot: float, strike: float, t_years: float, vol: float, rate: float, is_call: bool) -> float:
+    if t_years <= 0 or vol <= 0:
+        intrinsic = max(spot - strike, 0.0) if is_call else max(strike - spot, 0.0)
+        return intrinsic
+    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * t_years) / (vol * math.sqrt(t_years))
+    d2 = d1 - vol * math.sqrt(t_years)
+    if is_call:
+        return spot * _norm_cdf(d1) - strike * math.exp(-rate * t_years) * _norm_cdf(d2)
+    return strike * math.exp(-rate * t_years) * _norm_cdf(-d2) - spot * _norm_cdf(-d1)
+
+
+def implied_vol_from_price(
+    market_price: float, spot: float, strike: float, t_years: float, is_call: bool, rate: float = 0.05
+) -> float | None:
+    """Bisection solve for IV. Returns None if it can't converge (bad quote)."""
+    if market_price <= 0 or t_years <= 0 or spot <= 0 or strike <= 0:
+        return None
+    lo, hi = 1e-4, 5.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        price = bs_price(spot, strike, t_years, mid, rate, is_call)
+        if price > market_price:
+            hi = mid
+        else:
+            lo = mid
+    result = (lo + hi) / 2
+    return result if 1e-3 < result < 4.9 else None
+
+
+def delta(spot: float, strike: float, t_years: float, vol: float, rate: float, is_call: bool) -> float | None:
+    if t_years <= 0 or vol <= 0 or spot <= 0 or strike <= 0:
+        return None
+    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * t_years) / (vol * math.sqrt(t_years))
+    return _norm_cdf(d1) if is_call else _norm_cdf(d1) - 1

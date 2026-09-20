@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPX 0DTE Spread Signals</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>SPX 0DTE Spread Signals</h1>
+      <div class="sub">SPY-derived signals, scaled to SPX &middot; informational only, not financial advice</div>
+    </div>
+    <button id="refreshBtn">Refresh now</button>
+  </header>
+
+  <div id="statusCard" class="card status-card">Loading...</div>
+
+  <div class="card" id="econCard">
+    <div class="section-title">Today's high-impact economic events</div>
+    <div id="econList" class="sub">Loading...</div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">Recent signal history</div>
+    <table id="historyTable">
+      <thead>
+        <tr><th>Time</th><th>Verdict</th><th>Strategy</th><th>Score</th><th>SPX est.</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="disclaimer">
+    This tool analyzes free, delayed-tolerant SPY market data (not a real-time SPX feed) and
+    rule-based technical/volume/economic-calendar signals to suggest SPX 0DTE spread ideas. It is
+    informational only, not registered investment advice, and does not place or manage trades.
+    All strikes and premiums are estimates scaled from the SPY options chain -- always confirm
+    against a live SPX quote before entering. Trading options, especially 0DTE, carries substantial
+    risk of loss.
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
