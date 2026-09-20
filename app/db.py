@@ -76,9 +76,31 @@ def _conn():
         conn.close()
 
 
+# Columns added to `signals` after it first shipped. `CREATE TABLE IF NOT
+# EXISTS` is a no-op on a table that already exists -- it does NOT add new
+# columns -- so an existing signals.db from before these were added would
+# otherwise fail every INSERT with "no column named ...", silently, since
+# nothing surfaces that error to the UI (the frontend just sees no new row).
+_SIGNALS_MIGRATIONS = {
+    "predicted_bucket": "TEXT",
+    "predicted_confidence": "REAL",
+    "predicted_net_score": "REAL",
+    "prediction_resolve_by": "TEXT",
+    "prediction_resolved_at": "TEXT",
+    "realized_bucket": "TEXT",
+    "realized_pct_change": "REAL",
+    "prediction_correct": "INTEGER",
+    "prediction_direction_correct": "INTEGER",
+}
+
+
 def init_db() -> None:
     with _conn() as conn:
         conn.executescript(SCHEMA)
+        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()}
+        for column, sql_type in _SIGNALS_MIGRATIONS.items():
+            if column not in existing_columns:
+                conn.execute(f"ALTER TABLE signals ADD COLUMN {column} {sql_type}")
 
 
 def record_cycle(
