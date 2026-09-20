@@ -65,12 +65,24 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
    automatically rewrites its own weights or thresholds.
 7. **Predicted movement -- always on.** Separate from the trade suggestion
    (which is gated and can legitimately say nothing), every cycle also
-   buckets the same weighted signal consensus into 5 always-shown buckets
-   -- Big Down / Small Down / Flat / Small Up / Big Up -- each with its own
-   confidence score, so there's always *some* read on where SPY looks
-   likely to go even when nothing is confident enough to trade. Every
-   prediction is checked ~30 minutes later against what SPY actually did
-   (`PREDICTION_HORIZON_MINUTES` in `config.py`) and scored both on an
+   buckets into 5 always-shown buckets -- Big Down / Small Down / Flat /
+   Small Up / Big Up -- so there's always *some* read on where SPY looks
+   likely to go even when nothing is confident enough to trade. Direction
+   and magnitude are deliberately independent evidence, not the same
+   number split in two:
+   - **Direction & confidence** come from the same weighted 5-signal
+     consensus as the trade-confidence gate.
+   - **Magnitude** (small vs big) comes from the options market's own
+     IV-implied expected move for the horizon (spot &times; ATM IV &times;
+     &radic;time -- the same "expected move" math options traders use to
+     size ranges), falling back to realized ATR when no chain is
+     available. A strong directional score with a low implied move still
+     shows "small"; a big implied move can pair with only moderate
+     directional confidence. Both the expected-move % and its source
+     (`iv` or `atr`) are shown on the card.
+
+   Every prediction is checked ~30 minutes later against what SPY actually
+   did (`PREDICTION_HORIZON_MINUTES` in `config.py`) and scored both on an
    exact-bucket match and a softer "right direction" basis, surfaced in the
    dashboard's "Prediction accuracy" section. The "Preview last session"
    demo shows this with real hindsight immediately, since that session's
