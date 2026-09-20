@@ -6,7 +6,7 @@ import dataclasses
 import datetime as dt
 import logging
 
-from config import OPENING_RANGE_MINUTES, PROXY_TICKER, TZ
+from config import NO_NEW_TRADES_AFTER, OPENING_RANGE_MINUTES, PROXY_TICKER, TZ
 from app import db
 from app.data.market_data import (
     get_0dte_options_chain,
@@ -88,9 +88,16 @@ def run_demo_cycle() -> dict:
     the nearest available options expiration, so the pipeline can be
     sanity-checked while the market is closed (or on a Tue/Thu gap day with
     no same-day SPY expiration). NOT a live signal, and never persisted to
-    the signal history -- the caller/UI must label it clearly as a demo."""
-    bars = get_most_recent_session_bars(PROXY_TICKER)
-    if bars.empty:
+    the signal history -- the caller/UI must label it clearly as a demo.
+
+    Evaluated one minute before the real NO_NEW_TRADES_AFTER cutoff (not at
+    the session's last bar, which is always past it) and using only bars up
+    to that point -- otherwise every demo run would trivially fail on "past
+    cutoff" regardless of the actual signals, and indicators would be
+    computed with lookahead into bars from later in the day.
+    """
+    session_bars = get_most_recent_session_bars(PROXY_TICKER)
+    if session_bars.empty:
         return {
             "demo": True,
             "tradeable": False,
@@ -100,12 +107,22 @@ def run_demo_cycle() -> dict:
             "reasons": ["No historical market data available"],
         }
 
-    last_bar_time = bars.index[-1].to_pydatetime()
+    session_date = session_bars.index[0].date()
+    eval_dt = dt.datetime.combine(
+        session_date, dt.time(NO_NEW_TRADES_AFTER[0], NO_NEW_TRADES_AFTER[1]), tzinfo=TZ
+    ) - dt.timedelta(minutes=1)
+
+    bars = session_bars[session_bars.index <= eval_dt]
+    if bars.empty:  # cutoff earlier than the session's first bar -- fall back to everything available
+        bars = session_bars
+        eval_dt = bars.index[-1].to_pydatetime()
+
     chain = get_nearest_expiration_options_chain(PROXY_TICKER)
     ratio = get_spx_spy_ratio()
 
-    result = _analyze(bars, float(bars["Close"].iloc[-1]), last_bar_time, chain, ratio, last_bar_time)
+    result = _analyze(bars, float(bars["Close"].iloc[-1]), bars.index[-1].to_pydatetime(), chain, ratio, eval_dt)
     result["demo"] = True
-    result["session_date"] = last_bar_time.date().isoformat()
+    result["session_date"] = session_date.isoformat()
+    result["evaluated_at"] = eval_dt.strftime("%H:%M ET")
     result["chain_expiration"] = chain.expiration if chain else None
     return result

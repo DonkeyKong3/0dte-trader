@@ -146,7 +146,7 @@ async function runDemo() {
     const res = await fetch("/api/demo", { method: "POST" });
     const data = await res.json();
     const label = data.session_date
-      ? `Demo -- ${data.session_date} session, chain: ${data.chain_expiration || "n/a"} (not live)`
+      ? `Demo -- ${data.session_date} session @ ${data.evaluated_at || "?"}, chain: ${data.chain_expiration || "n/a"} (not live)`
       : "Demo -- not live";
     renderStatus(data, "demoCard", label);
   } catch (e) {
