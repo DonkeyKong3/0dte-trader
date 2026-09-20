@@ -6,7 +6,7 @@ import dataclasses
 import datetime as dt
 import logging
 
-from config import NO_NEW_TRADES_AFTER, OPENING_RANGE_MINUTES, PROXY_TICKER, TZ
+from config import FORCE_CLOSE_BY, NO_NEW_TRADES_AFTER, OPENING_RANGE_MINUTES, PROXY_TICKER, TZ
 from app import db
 from app.data.market_data import (
     get_0dte_options_chain,
@@ -80,6 +80,16 @@ def run_cycle(now: dt.datetime | None = None) -> dict:
         reasons=result["reasons"],
         now=now,
     )
+
+    # Track at most one open suggestion at a time -- if a trade is already
+    # open, a fresh confident card is still shown live but not separately
+    # paper-tracked (mirrors actually only holding one position at once,
+    # and keeps win-rate stats meaningful instead of over-counting the same
+    # real-world trade every poll while conditions persist).
+    if result["card"] and not db.open_trades():
+        force_close_by = now.replace(hour=FORCE_CLOSE_BY[0], minute=FORCE_CLOSE_BY[1], second=0, microsecond=0)
+        db.open_trade(result["card"], result["signals"], force_close_by, now, result["spy_price"])
+
     return result
 
 

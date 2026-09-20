@@ -185,3 +185,17 @@ button.secondary {
 .pill.bullish { background: rgba(47,191,113,0.15); color: var(--bull); }
 .pill.bearish { background: rgba(229,72,77,0.15); color: var(--bear); }
 .pill.neutral { background: rgba(136,146,166,0.15); color: var(--neutral); }
+.pill.won { background: rgba(47,191,113,0.15); color: var(--bull); }
+.pill.lost { background: rgba(229,72,77,0.15); color: var(--bear); }
+.pill.open { background: rgba(74,158,255,0.15); color: var(--accent); }
+.pill.unresolved { background: rgba(230,162,60,0.15); color: var(--warn); }
+
+.notes-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.notes-list li { margin-bottom: 2px; }
+.pnl-pos { color: var(--bull); }
+.pnl-neg { color: var(--bear); }

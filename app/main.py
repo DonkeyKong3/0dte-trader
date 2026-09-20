@@ -70,6 +70,16 @@ def get_history(limit: int = 50):
     return db.history(limit)
 
 
+@app.get("/api/trades")
+def get_trades(limit: int = 50):
+    return db.trades_history(limit)
+
+
+@app.get("/api/stats")
+def get_stats():
+    return db.trade_stats()
+
+
 @app.get("/api/econ-today")
 def econ_today():
     now = dt.datetime.now(TZ)

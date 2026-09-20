@@ -12,6 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from config import MARKET_CLOSE, MARKET_OPEN, POLL_INTERVAL_SECONDS, TZ
 from app.engine.engine import run_cycle
+from app.engine.resolution import check_open_trades
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,10 @@ def _tick() -> None:
     now = dt.datetime.now(TZ)
     if not _market_is_open(now):
         return
+    try:
+        check_open_trades(now)  # resolve existing trades before deciding whether to open a new one
+    except Exception:
+        log.exception("Trade resolution failed")
     try:
         run_cycle(now)
     except Exception:

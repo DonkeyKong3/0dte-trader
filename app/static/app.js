@@ -87,6 +87,60 @@ async function renderEcon() {
   }
 }
 
+async function renderStats() {
+  const summaryEl = document.getElementById("statsSummary");
+  const byStrategyEl = document.getElementById("statsByStrategy");
+  try {
+    const res = await fetch("/api/stats");
+    const s = await res.json();
+    if (!s.total_resolved) {
+      summaryEl.textContent = "No resolved trades yet -- stats will appear once a suggested trade hits its target, stop, or cutoff.";
+      byStrategyEl.innerHTML = "";
+      return;
+    }
+    summaryEl.innerHTML = `<strong>${s.win_rate}%</strong> win rate over ${s.total_resolved} resolved trade${s.total_resolved === 1 ? "" : "s"} (${s.wins}W / ${s.losses}L) &middot; avg P&amp;L ${fmtMoney(s.avg_pnl)}`;
+    byStrategyEl.innerHTML = Object.entries(s.by_strategy)
+      .map(
+        ([strategy, st]) => `
+        <div class="stat">
+          <div class="label">${STRATEGY_LABELS[strategy] || strategy}</div>
+          <div class="value">${st.win_rate ?? "--"}% <span class="sub">(${st.wins}/${st.total})</span></div>
+        </div>`
+      )
+      .join("");
+  } catch (e) {
+    summaryEl.textContent = "Could not load stats.";
+  }
+}
+
+async function renderTrades() {
+  const tbody = document.querySelector("#tradesTable tbody");
+  try {
+    const res = await fetch("/api/trades?limit=25");
+    const rows = await res.json();
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="6">No tracked trades yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows
+      .map((t) => {
+        const pnlClass = t.pnl == null ? "" : t.pnl >= 0 ? "pnl-pos" : "pnl-neg";
+        const notes = (t.reason_tags || []).map((r) => `<li>${r}</li>`).join("");
+        return `<tr>
+          <td>${fmtTime(t.opened_at)}</td>
+          <td>${STRATEGY_LABELS[t.strategy] || t.strategy}</td>
+          <td><span class="pill ${t.status}">${t.status}</span></td>
+          <td>${t.exit_reason_code || "--"}</td>
+          <td class="${pnlClass}">${t.pnl != null ? fmtMoney(t.pnl) : "--"}</td>
+          <td>${notes ? `<ul class="notes-list">${notes}</ul>` : "--"}</td>
+        </tr>`;
+      })
+      .join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6">Could not load tracked trades.</td></tr>`;
+  }
+}
+
 async function renderHistory() {
   const tbody = document.querySelector("#historyTable tbody");
   try {
@@ -130,7 +184,7 @@ async function forceRefresh() {
   } catch (e) {
     // ignore -- next poll will pick it up
   }
-  await Promise.all([refreshSignal(), renderHistory()]);
+  await Promise.all([refreshSignal(), renderHistory(), renderStats(), renderTrades()]);
   btn.disabled = false;
   btn.textContent = "Refresh now";
 }
@@ -162,5 +216,9 @@ document.getElementById("demoBtn").addEventListener("click", runDemo);
 refreshSignal();
 renderEcon();
 renderHistory();
+renderStats();
+renderTrades();
 setInterval(refreshSignal, 30000);
 setInterval(renderHistory, 60000);
+setInterval(renderStats, 60000);
+setInterval(renderTrades, 60000);

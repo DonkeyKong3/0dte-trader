@@ -52,6 +52,17 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
    app has no brokerage connection and can't know if/when you actually
    opened the position, these are the rules to manage it by rather than a
    live "close now" push.
+6. **Track record.** Every confident card is also paper-tracked: at most
+   one open "trade" at a time, re-priced against the live options chain
+   every poll cycle, and automatically resolved (won/lost) the moment it
+   hits its own profit target, stop loss, or force-close cutoff -- the
+   exact same rules the card told you to manage it by. Losses get a
+   best-effort, auto-generated reason tag (wrong direction call, right
+   direction but stopped out anyway, a high-impact econ event that day,
+   or an entry on only borderline confidence) so patterns are visible for
+   review, rather than a black box. This is diagnostic data for you (or a
+   future session) to act on by hand-tuning `config.py` -- nothing here
+   automatically rewrites its own weights or thresholds.
 
 ## Running it
 
@@ -145,6 +156,16 @@ and never go stale.
 - **No backtesting yet.** A natural next step is replaying historical
   sessions through the same engine to see how the confidence gate would
   have performed before trusting it live.
+- **Track record is paper-tracked, not a real fill.** It re-prices the
+  same strikes against the live SPY chain, which is the same estimate
+  methodology as the entry card -- it will not exactly match what a real
+  broker fill would have done (slippage, bid/ask timing), but it's
+  consistent with itself, so win-rate trends over time are meaningful
+  even if any single trade's exact dollar P&L isn't execution-grade.
+- **Only one trade tracked at a time.** If the engine stays confident
+  across several poll cycles, that's treated as the same suggestion, not
+  a new one each time -- otherwise win-rate stats would double-count a
+  single real-world trade. A fresh card still displays live either way.
 - **No brokerage/execution integration.** It tells you what to do; you
   place and close the trade yourself.
 

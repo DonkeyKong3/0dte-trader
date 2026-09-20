@@ -84,6 +84,49 @@ def _atm_iv(chain: OptionsChain, spot: float) -> float | None:
     return sum(ivs) / len(ivs)
 
 
+def reprice_trade(trade: dict, chain: OptionsChain, ratio: float | None) -> float | None:
+    """Re-prices an already-opened tracked trade's exact strikes against a
+    fresh chain snapshot, in the same units as entry_price/profit_target_
+    price/stop_loss_price so the resolution engine can compare directly:
+    for credit spreads and the condor this is the cost to buy back; for
+    debit spreads it's the spread's current resale value. Returns None if
+    the chain doesn't have usable quotes for those strikes right now (e.g.
+    a momentary bad tick) -- caller should just retry next cycle rather
+    than resolve on missing data.
+    """
+    if chain is None or ratio is None:
+        return None
+
+    strategy = trade["strategy"]
+
+    def leg_mid_at_spx_strike(legs: list[OptionLeg], spx_strike: float | None) -> float | None:
+        if spx_strike is None:
+            return None
+        leg = _find_leg_near_strike(legs, spx_strike / ratio)
+        return leg.mid if leg else None
+
+    if strategy == "iron_condor":
+        call_short = leg_mid_at_spx_strike(chain.calls, trade["call_short_strike"])
+        call_long = leg_mid_at_spx_strike(chain.calls, trade["call_long_strike"])
+        put_short = leg_mid_at_spx_strike(chain.puts, trade["put_short_strike"])
+        put_long = leg_mid_at_spx_strike(chain.puts, trade["put_long_strike"])
+        if None in (call_short, call_long, put_short, put_long):
+            return None
+        cost_to_close_spy = (call_short - call_long) + (put_short - put_long)
+        return max(cost_to_close_spy * ratio, 0.0)
+
+    is_call = strategy in ("bear_call_credit", "bull_call_debit")
+    legs = chain.calls if is_call else chain.puts
+    short_mid = leg_mid_at_spx_strike(legs, trade["short_strike"])
+    long_mid = leg_mid_at_spx_strike(legs, trade["long_strike"])
+    if short_mid is None or long_mid is None:
+        return None
+
+    if strategy in ("bull_put_credit", "bear_call_credit"):
+        return max((short_mid - long_mid) * ratio, 0.0)
+    return max((long_mid - short_mid) * ratio, 0.0)  # bull_call_debit, bear_put_debit
+
+
 def _signal(signals: list[SignalResult], name: str) -> SignalResult | None:
     return next((s for s in signals if s.name == name), None)
 
