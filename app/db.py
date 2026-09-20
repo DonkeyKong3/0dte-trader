@@ -20,7 +20,16 @@ CREATE TABLE IF NOT EXISTS signals (
     spy_price REAL,
     spx_estimate REAL,
     card_json TEXT,
-    reasons_json TEXT
+    reasons_json TEXT,
+    predicted_bucket TEXT,
+    predicted_confidence REAL,
+    predicted_net_score REAL,
+    prediction_resolve_by TEXT,
+    prediction_resolved_at TEXT,
+    realized_bucket TEXT,
+    realized_pct_change REAL,
+    prediction_correct INTEGER,
+    prediction_direction_correct INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS trades (
@@ -80,14 +89,19 @@ def record_cycle(
     spx_estimate: float | None,
     card: dict | None,
     reasons: list[str],
+    predicted_bucket: str | None = None,
+    predicted_confidence: float | None = None,
+    predicted_net_score: float | None = None,
+    prediction_resolve_by: dt.datetime | None = None,
     now: dt.datetime | None = None,
 ) -> None:
     now = now or dt.datetime.now(TZ)
     with _conn() as conn:
         conn.execute(
             """INSERT INTO signals
-               (timestamp, tradeable, direction, strategy, score, spy_price, spx_estimate, card_json, reasons_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (timestamp, tradeable, direction, strategy, score, spy_price, spx_estimate, card_json, reasons_json,
+                predicted_bucket, predicted_confidence, predicted_net_score, prediction_resolve_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 now.isoformat(),
                 1 if tradeable else 0,
@@ -98,6 +112,10 @@ def record_cycle(
                 spx_estimate,
                 json.dumps(card) if card else None,
                 json.dumps(reasons),
+                predicted_bucket,
+                predicted_confidence,
+                predicted_net_score,
+                prediction_resolve_by.isoformat() if prediction_resolve_by else None,
             ),
         )
 
@@ -117,9 +135,75 @@ def history(limit: int = 100) -> list[dict]:
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["tradeable"] = bool(d["tradeable"])
-    d["card"] = json.loads(d.pop("card_json")) if d.get("card_json") else None
-    d["reasons"] = json.loads(d.pop("reasons_json")) if d.get("reasons_json") else []
+    # `d.pop(...) if d.get(...) else None` only pops inside the truthy
+    # branch -- when card_json/reasons_json is NULL, the pop never runs and
+    # the raw *_json key leaks into the dict (and every API response).
+    card_json = d.pop("card_json", None)
+    d["card"] = json.loads(card_json) if card_json else None
+    reasons_json = d.pop("reasons_json", None)
+    d["reasons"] = json.loads(reasons_json) if reasons_json else []
+    if d.get("prediction_correct") is not None:
+        d["prediction_correct"] = bool(d["prediction_correct"])
+    if d.get("prediction_direction_correct") is not None:
+        d["prediction_direction_correct"] = bool(d["prediction_direction_correct"])
     return d
+
+
+# --- Prediction accuracy tracking ---
+
+def unresolved_due_predictions(now: dt.datetime) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM signals
+               WHERE prediction_resolve_by IS NOT NULL
+                 AND prediction_resolved_at IS NULL
+                 AND prediction_resolve_by <= ?""",
+            (now.isoformat(),),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def resolve_prediction(
+    signal_id: int,
+    realized_bucket: str,
+    realized_pct_change: float,
+    correct: bool,
+    direction_correct: bool,
+    resolved_at: dt.datetime,
+) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """UPDATE signals SET prediction_resolved_at = ?, realized_bucket = ?, realized_pct_change = ?,
+               prediction_correct = ?, prediction_direction_correct = ? WHERE id = ?""",
+            (resolved_at.isoformat(), realized_bucket, realized_pct_change, 1 if correct else 0, 1 if direction_correct else 0, signal_id),
+        )
+
+
+def prediction_stats() -> dict:
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM signals WHERE prediction_resolved_at IS NOT NULL").fetchall()
+
+    resolved = [_row_to_dict(r) for r in rows]
+    total = len(resolved)
+    exact = sum(1 for r in resolved if r["prediction_correct"])
+    direction_ok = sum(1 for r in resolved if r["prediction_direction_correct"])
+
+    by_bucket: dict[str, dict] = {}
+    for r in resolved:
+        b = by_bucket.setdefault(r["predicted_bucket"], {"total": 0, "correct": 0, "direction_correct": 0})
+        b["total"] += 1
+        b["correct"] += 1 if r["prediction_correct"] else 0
+        b["direction_correct"] += 1 if r["prediction_direction_correct"] else 0
+    for b in by_bucket.values():
+        b["accuracy"] = round(b["correct"] / b["total"] * 100, 1) if b["total"] else None
+        b["direction_accuracy"] = round(b["direction_correct"] / b["total"] * 100, 1) if b["total"] else None
+
+    return {
+        "total_resolved": total,
+        "exact_accuracy": round(exact / total * 100, 1) if total else None,
+        "direction_accuracy": round(direction_ok / total * 100, 1) if total else None,
+        "by_bucket": by_bucket,
+    }
 
 
 # --- Trade tracking (paper-tracked outcomes of confident suggestions) ---
@@ -228,7 +312,10 @@ def trade_stats() -> dict:
 
 def _trade_row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
-    d["signals"] = json.loads(d.pop("signals_json")) if d.get("signals_json") else []
-    d["rationale"] = json.loads(d.pop("rationale_json")) if d.get("rationale_json") else []
-    d["reason_tags"] = json.loads(d.pop("reason_tags_json")) if d.get("reason_tags_json") else []
+    signals_json = d.pop("signals_json", None)
+    d["signals"] = json.loads(signals_json) if signals_json else []
+    rationale_json = d.pop("rationale_json", None)
+    d["rationale"] = json.loads(rationale_json) if rationale_json else []
+    reason_tags_json = d.pop("reason_tags_json", None)
+    d["reason_tags"] = json.loads(reason_tags_json) if reason_tags_json else []
     return d

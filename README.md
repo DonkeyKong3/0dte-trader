@@ -63,6 +63,18 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
    review, rather than a black box. This is diagnostic data for you (or a
    future session) to act on by hand-tuning `config.py` -- nothing here
    automatically rewrites its own weights or thresholds.
+7. **Predicted movement -- always on.** Separate from the trade suggestion
+   (which is gated and can legitimately say nothing), every cycle also
+   buckets the same weighted signal consensus into 5 always-shown buckets
+   -- Big Down / Small Down / Flat / Small Up / Big Up -- each with its own
+   confidence score, so there's always *some* read on where SPY looks
+   likely to go even when nothing is confident enough to trade. Every
+   prediction is checked ~30 minutes later against what SPY actually did
+   (`PREDICTION_HORIZON_MINUTES` in `config.py`) and scored both on an
+   exact-bucket match and a softer "right direction" basis, surfaced in the
+   dashboard's "Prediction accuracy" section. The "Preview last session"
+   demo shows this with real hindsight immediately, since that session's
+   future bars already happened.
 
 ## Running it
 

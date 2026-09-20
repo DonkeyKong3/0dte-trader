@@ -190,6 +190,41 @@ button.secondary {
 .pill.open { background: rgba(74,158,255,0.15); color: var(--accent); }
 .pill.unresolved { background: rgba(230,162,60,0.15); color: var(--warn); }
 
+.pred-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pred-segment {
+  flex: 1;
+  min-width: 70px;
+  text-align: center;
+  padding: 8px 4px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: #0f1320;
+  border: 1px solid var(--panel-border);
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+.pred-segment.active {
+  opacity: 1;
+  border-color: currentColor;
+}
+
+.pred-segment.up { color: var(--bull); }
+.pred-segment.down { color: var(--bear); }
+.pred-segment.flat { color: var(--neutral); }
+
+.pred-segment.active.up { background: rgba(47,191,113,0.15); }
+.pred-segment.active.down { background: rgba(229,72,77,0.15); }
+.pred-segment.active.flat { background: rgba(136,146,166,0.15); }
+
 .notes-list {
   margin: 0;
   padding-left: 16px;

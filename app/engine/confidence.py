@@ -34,7 +34,11 @@ class ConfidenceVerdict:
     hard_block: bool = False
 
 
-def _weighted_direction_scores(signals: list[SignalResult]) -> tuple[float, float]:
+def weighted_direction_scores(signals: list[SignalResult]) -> tuple[float, float]:
+    """(bullish_score, bearish_score), each 0-100, weighted by SIGNAL_WEIGHTS.
+    Shared with prediction.py so the movement prediction is built on the
+    exact same signal consensus as the trade-confidence gate, not a second,
+    inconsistent model."""
     bullish = 0.0
     bearish = 0.0
     for sig in signals:
@@ -51,7 +55,7 @@ def evaluate(signals: list[SignalResult], now: dt.datetime | None = None) -> Con
     now = now or dt.datetime.now(TZ)
     reasons: list[str] = []
 
-    bullish_score, bearish_score = _weighted_direction_scores(signals)
+    bullish_score, bearish_score = weighted_direction_scores(signals)
     if bullish_score >= bearish_score:
         direction, score = "bullish", bullish_score
     else:

@@ -15,6 +15,7 @@ from config import CONFIDENCE_THRESHOLD, PROXY_TICKER, TZ
 from app import db
 from app.data.economic_calendar import high_impact_events_today
 from app.data.market_data import get_0dte_options_chain, get_last_quote, get_spx_spy_ratio
+from app.engine.prediction import bucket_side, classify_realized_move
 from app.engine.spreads import reprice_trade
 
 log = logging.getLogger(__name__)
@@ -110,3 +111,27 @@ def check_open_trades(now: dt.datetime | None = None) -> None:
 
         if now >= force_close_by:
             _resolve(trade, current_price, "time_cutoff", now, spy_price)
+
+
+def resolve_predictions(now: dt.datetime | None = None) -> None:
+    """Scores each due-but-unresolved movement prediction against actual
+    SPY price change since it was made."""
+    now = now or dt.datetime.now(TZ)
+    due = db.unresolved_due_predictions(now)
+    if not due:
+        return
+
+    quote = get_last_quote(PROXY_TICKER)
+    if quote is None:
+        return  # try again next tick rather than resolve on no data
+
+    for row in due:
+        entry_price = row.get("spy_price")
+        if not entry_price:
+            continue
+        pct_change = (quote.price - entry_price) / entry_price * 100
+        realized_bucket = classify_realized_move(pct_change)
+        predicted_bucket = row["predicted_bucket"]
+        correct = realized_bucket == predicted_bucket
+        direction_correct = bucket_side(realized_bucket) == bucket_side(predicted_bucket)
+        db.resolve_prediction(row["id"], realized_bucket, round(pct_change, 4), correct, direction_correct, now)

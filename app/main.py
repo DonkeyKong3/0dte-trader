@@ -12,6 +12,7 @@ from config import TZ
 from app import db
 from app.data.economic_calendar import events_for_date
 from app.engine.engine import run_cycle, run_demo_cycle
+from app.engine.prediction import LABELS as PREDICTION_LABELS
 from app.scheduler import start as start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,26 @@ def _json_on_unhandled_error(request: Request, exc: Exception):
         content={"tradeable": False, "direction": "none", "score": 0.0, "card": None, "reasons": [f"Server error: {exc}"]},
     )
 
+def _with_prediction(row: dict) -> dict:
+    """DB rows store flat predicted_* columns (simpler SQL); the API always
+    exposes a nested "prediction" object instead, matching what a live
+    /api/refresh or /api/demo cycle returns, so the frontend has one shape
+    to render regardless of which endpoint it came from."""
+    row = dict(row)
+    bucket = row.get("predicted_bucket")
+    row["prediction"] = (
+        {
+            "bucket": bucket,
+            "label": PREDICTION_LABELS.get(bucket, bucket),
+            "confidence": row.get("predicted_confidence"),
+            "net_score": row.get("predicted_net_score"),
+        }
+        if bucket
+        else None
+    )
+    return row
+
+
 _scheduler = None
 
 
@@ -47,8 +68,15 @@ def _startup() -> None:
 def get_signal():
     latest = db.latest()
     if latest is None:
-        return {"tradeable": False, "direction": "none", "score": 0.0, "card": None, "reasons": ["No data yet -- waiting for first cycle"]}
-    return latest
+        return {
+            "tradeable": False,
+            "direction": "none",
+            "score": 0.0,
+            "card": None,
+            "reasons": ["No data yet -- waiting for first cycle"],
+            "prediction": None,
+        }
+    return _with_prediction(latest)
 
 
 @app.post("/api/refresh")
@@ -67,7 +95,12 @@ def demo():
 
 @app.get("/api/history")
 def get_history(limit: int = 50):
-    return db.history(limit)
+    return [_with_prediction(row) for row in db.history(limit)]
+
+
+@app.get("/api/prediction-stats")
+def get_prediction_stats():
+    return db.prediction_stats()
 
 
 @app.get("/api/trades")

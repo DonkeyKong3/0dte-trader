@@ -158,3 +158,113 @@ def test_check_open_trades_marks_unresolved_when_no_price_at_cutoff(monkeypatch)
     trade = db.trades_history(10)[0]
     assert trade["status"] == "unresolved"
     assert trade["exit_reason_code"] == "unresolved"
+
+
+def test_resolve_predictions_marks_correct_when_realized_bucket_matches(monkeypatch):
+    now = dt.datetime(2026, 1, 6, 10, 0, tzinfo=TZ)
+    resolve_by = now + dt.timedelta(minutes=30)
+    db.record_cycle(
+        tradeable=False,
+        direction="none",
+        score=10.0,
+        spy_price=500.0,
+        spx_estimate=5000.0,
+        card=None,
+        reasons=[],
+        predicted_bucket="small_up",
+        predicted_confidence=30.0,
+        predicted_net_score=30.0,
+        prediction_resolve_by=resolve_by,
+        now=now,
+    )
+    monkeypatch.setattr(resolution, "get_last_quote", lambda ticker: _Quote(500.35))  # +0.07% -> small_up
+
+    resolution.resolve_predictions(resolve_by + dt.timedelta(minutes=1))
+
+    row = db.history(1)[0]
+    assert row["prediction_resolved_at"] is not None
+    assert row["realized_bucket"] == "small_up"
+    assert row["prediction_correct"] is True
+    assert row["prediction_direction_correct"] is True
+
+
+def test_resolve_predictions_marks_wrong_direction(monkeypatch):
+    now = dt.datetime(2026, 1, 6, 10, 0, tzinfo=TZ)
+    resolve_by = now + dt.timedelta(minutes=30)
+    db.record_cycle(
+        tradeable=False,
+        direction="none",
+        score=10.0,
+        spy_price=500.0,
+        spx_estimate=5000.0,
+        card=None,
+        reasons=[],
+        predicted_bucket="big_up",
+        predicted_confidence=70.0,
+        predicted_net_score=70.0,
+        prediction_resolve_by=resolve_by,
+        now=now,
+    )
+    monkeypatch.setattr(resolution, "get_last_quote", lambda ticker: _Quote(498.0))  # -0.4% -> big_down
+
+    resolution.resolve_predictions(resolve_by + dt.timedelta(minutes=1))
+
+    row = db.history(1)[0]
+    assert row["realized_bucket"] == "big_down"
+    assert row["prediction_correct"] is False
+    assert row["prediction_direction_correct"] is False
+
+
+def test_resolve_predictions_skips_not_yet_due(monkeypatch):
+    now = dt.datetime(2026, 1, 6, 10, 0, tzinfo=TZ)
+    resolve_by = now + dt.timedelta(minutes=30)
+    db.record_cycle(
+        tradeable=False,
+        direction="none",
+        score=10.0,
+        spy_price=500.0,
+        spx_estimate=5000.0,
+        card=None,
+        reasons=[],
+        predicted_bucket="flat",
+        predicted_confidence=90.0,
+        predicted_net_score=2.0,
+        prediction_resolve_by=resolve_by,
+        now=now,
+    )
+    monkeypatch.setattr(resolution, "get_last_quote", lambda ticker: _Quote(500.0))
+
+    resolution.resolve_predictions(now + dt.timedelta(minutes=5))  # before resolve_by
+
+    row = db.history(1)[0]
+    assert row["prediction_resolved_at"] is None
+
+
+def test_prediction_stats_aggregates_resolved_rows(monkeypatch):
+    now = dt.datetime(2026, 1, 6, 10, 0, tzinfo=TZ)
+    resolve_by = now + dt.timedelta(minutes=30)
+    for bucket, net in [("small_up", 30.0), ("small_up", 25.0), ("big_down", 70.0)]:
+        db.record_cycle(
+            tradeable=False,
+            direction="none",
+            score=10.0,
+            spy_price=500.0,
+            spx_estimate=5000.0,
+            card=None,
+            reasons=[],
+            predicted_bucket=bucket,
+            predicted_confidence=net,
+            predicted_net_score=net,
+            prediction_resolve_by=resolve_by,
+            now=now,
+        )
+    # First two "small_up" predictions come true; the "big_down" one doesn't (price rises instead).
+    monkeypatch.setattr(resolution, "get_last_quote", lambda ticker: _Quote(500.35))
+    resolution.resolve_predictions(resolve_by + dt.timedelta(minutes=1))
+
+    stats = db.prediction_stats()
+    assert stats["total_resolved"] == 3
+    assert stats["exact_accuracy"] == pytest.approx(200 / 3, abs=0.1)
+    assert stats["by_bucket"]["small_up"]["total"] == 2
+    assert stats["by_bucket"]["small_up"]["accuracy"] == pytest.approx(100.0)
+    assert stats["by_bucket"]["big_down"]["accuracy"] == pytest.approx(0.0)

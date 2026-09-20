@@ -6,6 +6,15 @@ const STRATEGY_LABELS = {
   iron_condor: "Iron Condor",
 };
 
+const PREDICTION_ORDER = ["big_down", "small_down", "flat", "small_up", "big_up"];
+const PREDICTION_LABELS = {
+  big_down: "Big Down",
+  small_down: "Small Down",
+  flat: "Flat",
+  small_up: "Small Up",
+  big_up: "Big Up",
+};
+
 function fmtMoney(x) {
   if (x === null || x === undefined) return "--";
   return "$" + Number(x).toFixed(2);
@@ -24,10 +33,41 @@ function renderStrikes(card) {
   return `Short ${card.short_strike} / Long ${card.long_strike}`;
 }
 
-function renderStatus(data, elId = "statusCard", banner = "") {
+function predictionHtml(prediction, hindsight) {
+  if (!prediction) {
+    return `<div class="sub">Predicted movement not available yet.</div>`;
+  }
+  const segments = PREDICTION_ORDER.map((b) => {
+    const active = b === prediction.bucket;
+    const side = b === "flat" ? "flat" : b.split("_")[1];
+    return `<div class="pred-segment ${side}${active ? " active" : ""}">${PREDICTION_LABELS[b]}</div>`;
+  }).join("");
+
+  let hindsightHtml = "";
+  if (hindsight) {
+    const resultClass = hindsight.correct ? "pnl-pos" : hindsight.direction_correct ? "" : "pnl-neg";
+    const resultLabel = hindsight.correct ? "Exact match" : hindsight.direction_correct ? "Right direction, wrong size" : "Missed";
+    const sign = hindsight.realized_pct_change > 0 ? "+" : "";
+    hindsightHtml = `
+      <div class="status-sub" style="margin-top:8px">
+        Actual by ${hindsight.checked_at}: <strong>${hindsight.label}</strong> (${sign}${hindsight.realized_pct_change.toFixed(2)}%)
+        &middot; <span class="${resultClass}">${resultLabel}</span>
+      </div>`;
+  }
+
+  return `
+    <div class="section-title" style="margin-top:16px">Predicted movement</div>
+    <div class="pred-row">${segments}</div>
+    <div class="status-sub" style="margin-top:6px">Predicted: <strong>${prediction.label}</strong> &middot; confidence ${prediction.confidence}%</div>
+    ${hindsightHtml}
+  `;
+}
+
+function renderStatus(data, elId = "statusCard", banner = "", hindsight = null) {
   const el = document.getElementById(elId);
   const direction = data.direction || "none";
   const bannerHtml = banner ? `<div class="demo-banner">${banner}</div><br>` : "";
+  const predictionBlock = predictionHtml(data.prediction, hindsight);
 
   if (!data.tradeable || !data.card) {
     el.className = "card status-card";
@@ -38,6 +78,7 @@ function renderStatus(data, elId = "statusCard", banner = "") {
       <div class="status-sub">Confidence score: ${data.score ?? 0}/100</div>
       <div class="score-bar"><div class="score-fill" style="width:${data.score ?? 0}%"></div></div>
       <ul class="rationale">${reasons || "<li>Waiting on more signal.</li>"}</ul>
+      ${predictionBlock}
     `;
     return;
   }
@@ -67,6 +108,7 @@ function renderStatus(data, elId = "statusCard", banner = "") {
 
     <ul class="rationale">${rationale}</ul>
     <div class="status-sub" style="margin-top:12px">${card.note}</div>
+    ${predictionBlock}
   `;
 }
 
@@ -110,6 +152,33 @@ async function renderStats() {
       .join("");
   } catch (e) {
     summaryEl.textContent = "Could not load stats.";
+  }
+}
+
+async function renderPredictionStats() {
+  const summaryEl = document.getElementById("predictionStatsSummary");
+  const byBucketEl = document.getElementById("predictionStatsByBucket");
+  try {
+    const res = await fetch("/api/prediction-stats");
+    const s = await res.json();
+    if (!s.total_resolved) {
+      summaryEl.textContent = `No resolved predictions yet -- each one checks itself against actual price action a while later.`;
+      byBucketEl.innerHTML = "";
+      return;
+    }
+    summaryEl.innerHTML = `<strong>${s.exact_accuracy}%</strong> exact-bucket accuracy &middot; <strong>${s.direction_accuracy}%</strong> right-direction accuracy over ${s.total_resolved} resolved prediction${s.total_resolved === 1 ? "" : "s"}`;
+    byBucketEl.innerHTML = PREDICTION_ORDER.filter((b) => s.by_bucket[b])
+      .map((b) => {
+        const st = s.by_bucket[b];
+        return `
+        <div class="stat">
+          <div class="label">${PREDICTION_LABELS[b]}</div>
+          <div class="value">${st.accuracy ?? "--"}% <span class="sub">(${st.total} made)</span></div>
+        </div>`;
+      })
+      .join("");
+  } catch (e) {
+    summaryEl.textContent = "Could not load prediction stats.";
   }
 }
 
@@ -184,7 +253,7 @@ async function forceRefresh() {
   } catch (e) {
     // ignore -- next poll will pick it up
   }
-  await Promise.all([refreshSignal(), renderHistory(), renderStats(), renderTrades()]);
+  await Promise.all([refreshSignal(), renderHistory(), renderStats(), renderTrades(), renderPredictionStats()]);
   btn.disabled = false;
   btn.textContent = "Refresh now";
 }
@@ -202,7 +271,7 @@ async function runDemo() {
     const label = data.session_date
       ? `Demo -- ${data.session_date} session @ ${data.evaluated_at || "?"}, chain: ${data.chain_expiration || "n/a"} (not live)`
       : "Demo -- not live";
-    renderStatus(data, "demoCard", label);
+    renderStatus(data, "demoCard", label, data.prediction_hindsight || null);
   } catch (e) {
     demoCard.innerHTML = "Could not load demo preview.";
   }
@@ -218,7 +287,9 @@ renderEcon();
 renderHistory();
 renderStats();
 renderTrades();
+renderPredictionStats();
 setInterval(refreshSignal, 30000);
 setInterval(renderHistory, 60000);
 setInterval(renderStats, 60000);
 setInterval(renderTrades, 60000);
+setInterval(renderPredictionStats, 60000);

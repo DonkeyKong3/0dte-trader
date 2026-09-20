@@ -6,7 +6,14 @@ import dataclasses
 import datetime as dt
 import logging
 
-from config import FORCE_CLOSE_BY, NO_NEW_TRADES_AFTER, OPENING_RANGE_MINUTES, PROXY_TICKER, TZ
+from config import (
+    FORCE_CLOSE_BY,
+    NO_NEW_TRADES_AFTER,
+    OPENING_RANGE_MINUTES,
+    PREDICTION_HORIZON_MINUTES,
+    PROXY_TICKER,
+    TZ,
+)
 from app import db
 from app.data.market_data import (
     get_0dte_options_chain,
@@ -18,6 +25,7 @@ from app.data.market_data import (
 )
 from app.engine import signals as sig
 from app.engine.confidence import evaluate
+from app.engine.prediction import LABELS as PREDICTION_LABELS, bucket_side, classify_realized_move, predict_movement
 from app.engine.spreads import build_trade_card
 
 log = logging.getLogger(__name__)
@@ -34,6 +42,7 @@ def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: f
 
     verdict = evaluate(signal_list, now)
     card = build_trade_card(verdict, chain, ratio, now)
+    prediction = predict_movement(signal_list)
 
     spx_estimate = quote_price * ratio if ratio else None
     card_dict = dataclasses.asdict(card) if card else None
@@ -52,6 +61,12 @@ def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: f
         "spy_price": quote_price,
         "spx_estimate": spx_estimate,
         "data_as_of": quote_as_of.isoformat(),
+        "prediction": {
+            "bucket": prediction.bucket,
+            "label": PREDICTION_LABELS[prediction.bucket],
+            "confidence": prediction.confidence,
+            "net_score": prediction.net_score,
+        },
     }
 
 
@@ -64,11 +79,19 @@ def run_cycle(now: dt.datetime | None = None) -> dict:
     ratio = get_spx_spy_ratio()
 
     if bars.empty or quote is None:
-        result = {"tradeable": False, "direction": "none", "score": 0.0, "card": None, "reasons": ["No market data available"]}
-        db.record_cycle(False, "none", 0.0, None, None, None, result["reasons"], now)
+        result = {
+            "tradeable": False,
+            "direction": "none",
+            "score": 0.0,
+            "card": None,
+            "reasons": ["No market data available"],
+            "prediction": None,
+        }
+        db.record_cycle(False, "none", 0.0, None, None, None, result["reasons"], now=now)
         return result
 
     result = _analyze(bars, quote.price, quote.as_of, chain, ratio, now)
+    prediction_resolve_by = now + dt.timedelta(minutes=PREDICTION_HORIZON_MINUTES)
 
     db.record_cycle(
         tradeable=result["tradeable"],
@@ -78,6 +101,10 @@ def run_cycle(now: dt.datetime | None = None) -> dict:
         spx_estimate=result["spx_estimate"],
         card=result["card"],
         reasons=result["reasons"],
+        predicted_bucket=result["prediction"]["bucket"],
+        predicted_confidence=result["prediction"]["confidence"],
+        predicted_net_score=result["prediction"]["net_score"],
+        prediction_resolve_by=prediction_resolve_by,
         now=now,
     )
 
@@ -115,6 +142,7 @@ def run_demo_cycle() -> dict:
             "score": 0.0,
             "card": None,
             "reasons": ["No historical market data available"],
+            "prediction": None,
         }
 
     session_date = session_bars.index[0].date()
@@ -135,4 +163,24 @@ def run_demo_cycle() -> dict:
     result["session_date"] = session_date.isoformat()
     result["evaluated_at"] = eval_dt.strftime("%H:%M ET")
     result["chain_expiration"] = chain.expiration if chain else None
+
+    # Hindsight: we already have the rest of that session's real bars, so
+    # show immediately how the prediction actually played out -- no need
+    # to wait PREDICTION_HORIZON_MINUTES like the live pipeline does.
+    horizon_dt = eval_dt + dt.timedelta(minutes=PREDICTION_HORIZON_MINUTES)
+    future = session_bars[session_bars.index >= horizon_dt]
+    if not future.empty and result.get("prediction"):
+        entry_price = float(bars["Close"].iloc[-1])
+        future_price = float(future["Close"].iloc[0])
+        pct_change = (future_price - entry_price) / entry_price * 100
+        realized_bucket = classify_realized_move(pct_change)
+        predicted_bucket = result["prediction"]["bucket"]
+        result["prediction_hindsight"] = {
+            "bucket": realized_bucket,
+            "label": PREDICTION_LABELS[realized_bucket],
+            "realized_pct_change": round(pct_change, 4),
+            "correct": realized_bucket == predicted_bucket,
+            "direction_correct": bucket_side(realized_bucket) == bucket_side(predicted_bucket),
+            "checked_at": future.index[0].strftime("%H:%M ET"),
+        }
     return result
