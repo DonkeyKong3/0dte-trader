@@ -10,6 +10,7 @@ IMPORTANT: Yahoo Finance has no real-time SLA. Every payload here carries an
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import math
 from dataclasses import dataclass, field
 
@@ -17,6 +18,8 @@ import pandas as pd
 import yfinance as yf
 
 from config import PROXY_TICKER, TARGET_TICKER, TZ
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -94,17 +97,36 @@ def _todays_expiration(ticker: yf.Ticker) -> str | None:
     return None
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    """`row.get(...) or default` silently mishandles NaN (NaN is truthy in
+    Python, so `NaN or 0.0` evaluates to NaN, not 0.0) -- illiquid/newly
+    listed contracts report NaN volume/OI/bid/ask constantly, so this must
+    be an explicit NaN check, not a truthiness check."""
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except TypeError:
+        pass
+    return float(value)
+
+
+def _safe_int(value, default: int = 0) -> int:
+    return int(_safe_float(value, default))
+
+
 def _to_legs(df: pd.DataFrame) -> list[OptionLeg]:
     legs = []
     for _, row in df.iterrows():
         legs.append(
             OptionLeg(
-                strike=float(row["strike"]),
-                bid=float(row.get("bid") or 0.0),
-                ask=float(row.get("ask") or 0.0),
-                last=float(row.get("lastPrice") or 0.0),
-                volume=int(row.get("volume") or 0),
-                open_interest=int(row.get("openInterest") or 0),
+                strike=_safe_float(row.get("strike")),
+                bid=_safe_float(row.get("bid")),
+                ask=_safe_float(row.get("ask")),
+                last=_safe_float(row.get("lastPrice")),
+                volume=_safe_int(row.get("volume")),
+                open_interest=_safe_int(row.get("openInterest")),
                 implied_vol=float(row["impliedVolatility"]) if pd.notna(row.get("impliedVolatility")) else None,
             )
         )
@@ -114,14 +136,15 @@ def _to_legs(df: pd.DataFrame) -> list[OptionLeg]:
 def _fetch_chain(ticker_symbol: str, expiration: str, underlying_price: float) -> OptionsChain | None:
     try:
         chain = yf.Ticker(ticker_symbol).option_chain(expiration)
+        return OptionsChain(
+            expiration=expiration,
+            underlying_price=underlying_price,
+            calls=_to_legs(chain.calls),
+            puts=_to_legs(chain.puts),
+        )
     except Exception:
+        log.exception("Failed to fetch/parse options chain for %s %s", ticker_symbol, expiration)
         return None
-    return OptionsChain(
-        expiration=expiration,
-        underlying_price=underlying_price,
-        calls=_to_legs(chain.calls),
-        puts=_to_legs(chain.puts),
-    )
 
 
 def get_0dte_options_chain(ticker_symbol: str = PROXY_TICKER) -> OptionsChain | None:

@@ -3,10 +3,10 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from config import TZ
 from app import db
@@ -15,9 +15,23 @@ from app.engine.engine import run_cycle, run_demo_cycle
 from app.scheduler import start as start_scheduler
 
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="SPX 0DTE Spread Signals")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.exception_handler(Exception)
+def _json_on_unhandled_error(request: Request, exc: Exception):
+    """An unhandled exception otherwise returns a plain-text 500, which
+    breaks the dashboard's `res.json()` and surfaces as a generic 'could
+    not load' with no clue why. Always return JSON instead so a bad data
+    quote degrades to a visible reason, not a silent frontend failure."""
+    log.exception("Unhandled error on %s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"tradeable": False, "direction": "none", "score": 0.0, "card": None, "reasons": [f"Server error: {exc}"]},
+    )
 
 _scheduler = None
 
