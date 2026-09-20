@@ -24,14 +24,16 @@ function renderStrikes(card) {
   return `Short ${card.short_strike} / Long ${card.long_strike}`;
 }
 
-function renderStatus(data) {
-  const el = document.getElementById("statusCard");
+function renderStatus(data, elId = "statusCard", banner = "") {
+  const el = document.getElementById(elId);
   const direction = data.direction || "none";
+  const bannerHtml = banner ? `<div class="demo-banner">${banner}</div><br>` : "";
 
   if (!data.tradeable || !data.card) {
     el.className = "card status-card";
     const reasons = (data.reasons || []).map((r) => `<li>${r}</li>`).join("");
     el.innerHTML = `
+      ${bannerHtml}
       <div class="status-headline neutral">No confident trade -- standing aside</div>
       <div class="status-sub">Confidence score: ${data.score ?? 0}/100</div>
       <div class="score-bar"><div class="score-fill" style="width:${data.score ?? 0}%"></div></div>
@@ -46,6 +48,7 @@ function renderStatus(data) {
   const rationale = (card.rationale || []).map((r) => `<li>${r}</li>`).join("");
 
   el.innerHTML = `
+    ${bannerHtml}
     <span class="pill ${dirClass}">${direction}</span>
     <div class="status-headline ${dirClass}" style="margin-top:10px">${STRATEGY_LABELS[card.strategy] || card.strategy}</div>
     <div class="status-sub">Confidence score: ${card.confidence_score}/100 &middot; expires ${card.expiration}</div>
@@ -132,7 +135,29 @@ async function forceRefresh() {
   btn.textContent = "Refresh now";
 }
 
+async function runDemo() {
+  const btn = document.getElementById("demoBtn");
+  const demoCard = document.getElementById("demoCard");
+  btn.disabled = true;
+  btn.textContent = "Loading last session...";
+  demoCard.style.display = "block";
+  demoCard.innerHTML = "Loading...";
+  try {
+    const res = await fetch("/api/demo", { method: "POST" });
+    const data = await res.json();
+    const label = data.session_date
+      ? `Demo -- ${data.session_date} session, chain: ${data.chain_expiration || "n/a"} (not live)`
+      : "Demo -- not live";
+    renderStatus(data, "demoCard", label);
+  } catch (e) {
+    demoCard.innerHTML = "Could not load demo preview.";
+  }
+  btn.disabled = false;
+  btn.textContent = "Preview last session";
+}
+
 document.getElementById("refreshBtn").addEventListener("click", forceRefresh);
+document.getElementById("demoBtn").addEventListener("click", runDemo);
 
 refreshSignal();
 renderEcon();

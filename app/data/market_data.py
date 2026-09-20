@@ -94,6 +94,36 @@ def _todays_expiration(ticker: yf.Ticker) -> str | None:
     return None
 
 
+def _to_legs(df: pd.DataFrame) -> list[OptionLeg]:
+    legs = []
+    for _, row in df.iterrows():
+        legs.append(
+            OptionLeg(
+                strike=float(row["strike"]),
+                bid=float(row.get("bid") or 0.0),
+                ask=float(row.get("ask") or 0.0),
+                last=float(row.get("lastPrice") or 0.0),
+                volume=int(row.get("volume") or 0),
+                open_interest=int(row.get("openInterest") or 0),
+                implied_vol=float(row["impliedVolatility"]) if pd.notna(row.get("impliedVolatility")) else None,
+            )
+        )
+    return legs
+
+
+def _fetch_chain(ticker_symbol: str, expiration: str, underlying_price: float) -> OptionsChain | None:
+    try:
+        chain = yf.Ticker(ticker_symbol).option_chain(expiration)
+    except Exception:
+        return None
+    return OptionsChain(
+        expiration=expiration,
+        underlying_price=underlying_price,
+        calls=_to_legs(chain.calls),
+        puts=_to_legs(chain.puts),
+    )
+
+
 def get_0dte_options_chain(ticker_symbol: str = PROXY_TICKER) -> OptionsChain | None:
     """Today's expiration chain for the proxy ticker, or None if SPY has no
     same-day expiration today (SPY trades M/W/F 0DTE-eligible expirations;
@@ -103,35 +133,42 @@ def get_0dte_options_chain(ticker_symbol: str = PROXY_TICKER) -> OptionsChain | 
     expiration = _todays_expiration(t)
     if not expiration:
         return None
+    quote = get_last_quote(ticker_symbol)
+    underlying_price = quote.price if quote else float("nan")
+    return _fetch_chain(ticker_symbol, expiration, underlying_price)
+
+
+def get_nearest_expiration_options_chain(ticker_symbol: str = PROXY_TICKER) -> OptionsChain | None:
+    """The soonest available expiration, regardless of whether it's today --
+    used only for the demo/preview pipeline (market closed, or a Tue/Thu gap
+    day) so the mechanics can be sanity-checked against real quotes. Not a
+    substitute for a same-day 0DTE chain."""
+    t = yf.Ticker(ticker_symbol)
     try:
-        chain = t.option_chain(expiration)
+        options = t.options
     except Exception:
+        return None
+    if not options:
         return None
     quote = get_last_quote(ticker_symbol)
     underlying_price = quote.price if quote else float("nan")
+    return _fetch_chain(ticker_symbol, options[0], underlying_price)
 
-    def to_legs(df: pd.DataFrame) -> list[OptionLeg]:
-        legs = []
-        for _, row in df.iterrows():
-            legs.append(
-                OptionLeg(
-                    strike=float(row["strike"]),
-                    bid=float(row.get("bid") or 0.0),
-                    ask=float(row.get("ask") or 0.0),
-                    last=float(row.get("lastPrice") or 0.0),
-                    volume=int(row.get("volume") or 0),
-                    open_interest=int(row.get("openInterest") or 0),
-                    implied_vol=float(row["impliedVolatility"]) if pd.notna(row.get("impliedVolatility")) else None,
-                )
-            )
-        return legs
 
-    return OptionsChain(
-        expiration=expiration,
-        underlying_price=underlying_price,
-        calls=to_legs(chain.calls),
-        puts=to_legs(chain.puts),
-    )
+def get_most_recent_session_bars(ticker: str = PROXY_TICKER) -> pd.DataFrame:
+    """1-minute bars for the most recently completed trading session --
+    works even when the market is currently closed (weekend/after-hours),
+    unlike get_intraday_bars which only has today's (possibly empty) bars.
+    Used by the demo/preview pipeline."""
+    try:
+        df = yf.Ticker(ticker).history(period="5d", interval="1m", prepost=False)
+    except Exception:
+        return pd.DataFrame()
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df.index = df.index.tz_convert(TZ) if df.index.tz is not None else df.index.tz_localize(TZ)
+    last_date = df.index[-1].date()
+    return df[df.index.date == last_date]
 
 
 # --- Black-Scholes IV/greeks fallback (yfinance's impliedVolatility field can

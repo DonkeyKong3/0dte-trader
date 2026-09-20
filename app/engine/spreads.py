@@ -36,8 +36,14 @@ def _round_to(value: float, base: float) -> float:
     return round(value / base) * base
 
 
-def _time_to_expiry_years(now: dt.datetime) -> float:
-    close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+def _time_to_expiry_years(now: dt.datetime, expiration: str) -> float:
+    """Years until 4pm ET on `expiration` (YYYY-MM-DD). Normally that's
+    today (live 0DTE), but the demo/preview pipeline can pass a chain whose
+    nearest expiration is a different, later date -- so this is computed
+    from the chain's actual expiration rather than assumed to be `now`'s
+    own date."""
+    exp_date = dt.datetime.strptime(expiration, "%Y-%m-%d").date()
+    close = dt.datetime.combine(exp_date, dt.time(16, 0), tzinfo=now.tzinfo)
     seconds_left = max((close - now).total_seconds(), 60)  # floor so BS math stays sane
     return seconds_left / (365 * 24 * 3600)
 
@@ -280,7 +286,7 @@ def build_trade_card(
         return None
 
     spot = chain.underlying_price
-    t_years = _time_to_expiry_years(now)
+    t_years = _time_to_expiry_years(now, chain.expiration)
 
     if verdict.tradeable and verdict.direction in ("bullish", "bearish"):
         momentum = _signal(verdict.signals, "momentum")

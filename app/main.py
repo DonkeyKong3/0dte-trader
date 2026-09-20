@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from config import TZ
 from app import db
 from app.data.economic_calendar import events_for_date
-from app.engine.engine import run_cycle
+from app.engine.engine import run_cycle, run_demo_cycle
 from app.scheduler import start as start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +41,14 @@ def get_signal():
 def refresh():
     """Force an immediate cycle instead of waiting for the next poll tick."""
     return run_cycle()
+
+
+@app.post("/api/demo")
+def demo():
+    """Replays the most recent completed session's real data through the
+    same pipeline, for sanity-checking while the market is closed. Not
+    persisted to signal history."""
+    return run_demo_cycle()
 
 
 @app.get("/api/history")

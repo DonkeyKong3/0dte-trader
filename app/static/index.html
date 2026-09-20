@@ -13,10 +13,15 @@
       <h1>SPX 0DTE Spread Signals</h1>
       <div class="sub">SPY-derived signals, scaled to SPX &middot; informational only, not financial advice</div>
     </div>
-    <button id="refreshBtn">Refresh now</button>
+    <div>
+      <button id="refreshBtn">Refresh now</button>
+      <button id="demoBtn" class="secondary">Preview last session</button>
+    </div>
   </header>
 
   <div id="statusCard" class="card status-card">Loading...</div>
+
+  <div id="demoCard" class="card status-card" style="display:none"></div>
 
   <div class="card" id="econCard">
     <div class="section-title">Today's high-impact economic events</div>
