@@ -55,11 +55,28 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
 
 ## Running it
 
+**Quick start (recommended):** double-click/run the script for your OS. It
+creates the virtual environment on first run, installs/updates dependencies,
+and starts the server bound to your network so your phone can reach it too.
+
+- Windows: right-click `run.ps1` -> **Run with PowerShell** (or run
+  `.\run.ps1` from a PowerShell prompt in the project folder)
+- macOS/Linux: `./run.sh` (first time: `chmod +x run.sh`)
+
+It'll print two URLs, e.g.:
+
+```
+This PC:   http://localhost:8000
+Phone/LAN: http://192.168.1.42:8000
+```
+
+**Manual setup**, if you'd rather do it yourself:
+
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv        # Windows: py -m venv .venv
+source .venv/bin/activate    # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Open `http://localhost:8000`. The scheduler polls every 60 seconds while
@@ -71,6 +88,35 @@ cycle instead of waiting for the next poll.
 **Note on SPY 0DTE availability:** SPY has same-day expirations on
 Mon/Wed/Fri; Tue/Thu are gap days with no 0DTE chain, so the engine will
 correctly report no options-based signal on those days.
+
+## Using it from your iPhone
+
+This is a Python web app -- iOS can't actually run Python/FastAPI/pandas
+natively (no real wheel support in any iOS shell app, and options like
+`iSH`/`a-Shell` emulate a slow, constrained Linux and would hit the same
+kind of build failures you just saw on Windows, worse). The practical setup
+instead: run it on a computer that's on, and view the dashboard from your
+iPhone's browser as a client.
+
+- **Same Wi-Fi as the computer:** run `run.ps1`/`run.sh`, then open the
+  printed `Phone/LAN` URL (e.g. `http://192.168.1.42:8000`) in Safari on
+  your iPhone. Nothing else to install. The one-time catch on Windows: the
+  first time you run it, Windows Firewall will likely prompt to allow Python
+  through on "Private networks" -- allow it, or your phone won't be able to
+  connect.
+- **Away from home / different network:** the phone can't reach a
+  `192.168.x.x` address over the internet. Two common ways around that,
+  neither of which requires opening ports on your router:
+  - [Tailscale](https://tailscale.com) (free for personal use) -- install it
+    on the computer and on your iPhone, then browse to the computer's
+    Tailscale address from anywhere. Simplest and keeps everything private.
+  - Deploy the app itself to a small always-on host (a cheap VPS, Render,
+    Fly.io, etc.) and browse to its public URL instead. More setup, but no
+    "leave your PC on" requirement.
+
+Either way, the app itself only needs to run in **one place** (your
+computer, or a small server) -- your iPhone is just viewing the dashboard
+in Safari, not running the engine.
 
 ## Configuration
 
