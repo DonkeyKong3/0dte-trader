@@ -22,6 +22,19 @@ app = FastAPI(title="SPX 0DTE Spread Signals")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
+@app.middleware("http")
+async def _no_cache(request: Request, call_next):
+    """StaticFiles/FileResponse don't send Cache-Control by default, so
+    browsers fall back to heuristic caching and can keep serving stale
+    CSS/JS/index.html for a while even on a normal refresh -- a real
+    problem for a dashboard that gets updated and restarted repeatedly.
+    Single local user, no CDN, nothing gained from caching here -- always
+    force a fresh fetch."""
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.exception_handler(Exception)
 def _json_on_unhandled_error(request: Request, exc: Exception):
     """An unhandled exception otherwise returns a plain-text 500, which
