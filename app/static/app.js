@@ -195,7 +195,7 @@ async function renderPredictionStats() {
 async function renderTrades() {
   const tbody = document.querySelector("#tradesTable tbody");
   try {
-    const res = await fetch("/api/trades?limit=25");
+    const res = await fetch("/api/trades?limit=200");
     const rows = await res.json();
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="6">No tracked trades yet.</td></tr>`;
@@ -223,7 +223,7 @@ async function renderTrades() {
 async function renderHistory() {
   const tbody = document.querySelector("#historyTable tbody");
   try {
-    const res = await fetch("/api/history?limit=25");
+    const res = await fetch("/api/history?limit=200");
     const rows = await res.json();
     tbody.innerHTML = rows
       .map((r) => {
