@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from config import PREDICTION_BIG_MOVE_PCT, PREDICTION_FLAT_THRESHOLD, TZ
-from app.data.market_data import OptionLeg, OptionsChain
+from app.data.market_data import OptionLeg, OptionsChain, bs_price
 from app.engine.prediction import (
     atr_expected_move_pct,
     bucket_side,
@@ -113,18 +113,36 @@ def _leg(strike, iv):
     return OptionLeg(strike=strike, bid=1.0, ask=1.0, last=1.0, volume=100, open_interest=100, implied_vol=iv)
 
 
+def _priced_leg(spot, strike, t_years, true_iv, is_call, bogus_raw_iv):
+    """A leg whose bid/ask ACTUALLY corresponds to true_iv (via Black-
+    Scholes), but whose raw implied_vol field is deliberately wrong --
+    mirrors the real production bug: Yahoo's raw field reporting SPY ATM
+    IV around 2-5% when the live price implied ~15-20%."""
+    price = bs_price(spot, strike, t_years, true_iv, 0.05, is_call)
+    return OptionLeg(strike=strike, bid=price, ask=price, last=price, volume=50, open_interest=50, implied_vol=bogus_raw_iv)
+
+
 def test_iv_expected_move_pct_matches_formula():
-    chain = OptionsChain(expiration="2026-01-06", underlying_price=500.0, calls=[_leg(500.0, 0.20)], puts=[_leg(500.0, 0.20)])
+    spot, option_t_years, true_iv = 500.0, 0.02, 0.20
+    chain = OptionsChain(
+        expiration="2026-01-06",
+        underlying_price=spot,
+        calls=[_priced_leg(spot, 500.0, option_t_years, true_iv, True, bogus_raw_iv=0.03)],
+        puts=[_priced_leg(spot, 500.0, option_t_years, true_iv, False, bogus_raw_iv=0.03)],
+    )
     horizon_years = 0.001
-    result = iv_expected_move_pct(chain, 500.0, horizon_years)
-    assert result == pytest.approx(0.20 * math.sqrt(horizon_years) * 100)
+    result = iv_expected_move_pct(chain, spot, option_t_years, horizon_years)
+    # Uses the price-solved true_iv (0.20), not the bogus raw field (0.03) --
+    # this is the actual bug that made "big" never get predicted in production.
+    assert result == pytest.approx(true_iv * math.sqrt(horizon_years) * 100, rel=0.01)
 
 
-def test_iv_expected_move_pct_none_without_chain_or_spot():
-    assert iv_expected_move_pct(None, 500.0, 0.001) is None
+def test_iv_expected_move_pct_none_without_chain_spot_or_option_t_years():
+    assert iv_expected_move_pct(None, 500.0, 0.02, 0.001) is None
     chain = OptionsChain(expiration="2026-01-06", underlying_price=500.0, calls=[_leg(500.0, 0.20)], puts=[])
-    assert iv_expected_move_pct(chain, None, 0.001) is None
-    assert iv_expected_move_pct(chain, float("nan"), 0.001) is None
+    assert iv_expected_move_pct(chain, None, 0.02, 0.001) is None
+    assert iv_expected_move_pct(chain, float("nan"), 0.02, 0.001) is None
+    assert iv_expected_move_pct(chain, 500.0, None, 0.001) is None
 
 
 def test_atr_expected_move_pct_matches_formula():

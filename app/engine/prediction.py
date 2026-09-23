@@ -59,14 +59,21 @@ def bucket_side(bucket: str) -> str:
     return bucket.split("_")[1]
 
 
-def iv_expected_move_pct(chain: OptionsChain | None, spot: float | None, horizon_years: float) -> float | None:
-    """1-sigma expected % move over `horizon_years`, priced by the options
-    market right now (spot * ATM IV * sqrt(time)) -- the same "expected
-    move" calculation options traders use to size ranges. Real money
-    backing the number, independent of the technical signals."""
-    if chain is None or not spot or spot != spot:
+def iv_expected_move_pct(
+    chain: OptionsChain | None, spot: float | None, option_t_years: float | None, horizon_years: float
+) -> float | None:
+    """1-sigma expected % move over `horizon_years` (the prediction
+    horizon), priced by the options market right now (spot * ATM IV *
+    sqrt(horizon_years)) -- the same "expected move" calculation options
+    traders use to size ranges. Real money backing the number, independent
+    of the technical signals.
+
+    `option_t_years` is the OPTION's actual time-to-expiry, separate from
+    `horizon_years` -- it's needed to solve today's IV correctly (see
+    atm_iv/leg_effective_iv), not to scale the resulting move."""
+    if chain is None or not spot or spot != spot or not option_t_years:
         return None
-    iv = atm_iv(chain, spot)
+    iv = atm_iv(chain, spot, option_t_years)
     if not iv:
         return None
     return iv * math.sqrt(horizon_years) * 100

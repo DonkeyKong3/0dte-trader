@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from app.data.market_data import OptionsChain
+from app.data.market_data import OptionsChain, leg_effective_iv
 from app.engine import indicators as ind
 
 
@@ -108,28 +108,38 @@ def opening_range_signal(df: pd.DataFrame, minutes: int) -> SignalResult:
     return SignalResult("opening_range", "neutral", 10, f"Still inside opening range [{low:.2f}, {high:.2f}]")
 
 
-def iv_skew_signal(chain: OptionsChain | None) -> SignalResult:
+def iv_skew_signal(chain: OptionsChain | None, spot: float | None = None, t_years: float | None = None) -> SignalResult:
     """Compares near-the-money put vs call implied vol. Richer puts (put
     skew) reflect hedging/fear demand -- a classic tell for elevated
     downside risk pricing, which we treat as a mildly bearish tilt and as
-    a reason credit-spread premium is richer than usual."""
+    a reason credit-spread premium is richer than usual.
+
+    IV here is solved from each leg's live mid price (leg_effective_iv),
+    not read directly from the chain's raw impliedVolatility field, which
+    is frequently stale/unreliable for thin, near-expiry 0DTE contracts --
+    confirmed in production reporting SPY ATM IV around 2-5% on an
+    ordinary session. `spot`/`t_years` are required to solve it; without
+    them this falls back to the raw field only.
+    """
     if chain is None or not chain.calls or not chain.puts or chain.underlying_price != chain.underlying_price:
         return SignalResult("iv_skew", "neutral", 0, "Options chain unavailable")
 
-    spot = chain.underlying_price
+    spot = spot if spot is not None else chain.underlying_price
 
-    def nearest_atm(legs):
-        candidates = [leg for leg in legs if leg.implied_vol and leg.implied_vol > 0]
+    def nearest_atm(legs, is_call):
+        candidates = [leg for leg in legs if leg.mid > 0 or (leg.implied_vol and leg.implied_vol > 0)]
         if not candidates:
-            return None
-        return min(candidates, key=lambda leg: abs(leg.strike - spot))
+            return None, None
+        leg = min(candidates, key=lambda leg: abs(leg.strike - spot))
+        iv = leg_effective_iv(leg, spot, t_years, is_call) if t_years else (leg.implied_vol or None)
+        return leg, iv
 
-    atm_call = nearest_atm(chain.calls)
-    atm_put = nearest_atm(chain.puts)
-    if not atm_call or not atm_put:
+    atm_call, call_iv = nearest_atm(chain.calls, True)
+    atm_put, put_iv = nearest_atm(chain.puts, False)
+    if not call_iv or not put_iv:
         return SignalResult("iv_skew", "neutral", 0, "No usable IV quotes near the money")
 
-    skew = atm_put.implied_vol - atm_call.implied_vol  # positive => puts richer
+    skew = put_iv - call_iv  # positive => puts richer
     strength = _clip(abs(skew) * 800)
 
     if skew > 0.01:

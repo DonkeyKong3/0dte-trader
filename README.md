@@ -79,7 +79,14 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
      available. A strong directional score with a low implied move still
      shows "small"; a big implied move can pair with only moderate
      directional confidence. Both the expected-move % and its source
-     (`iv` or `atr`) are shown on the card.
+     (`iv` or `atr`) are shown on the card. **IV here is solved from each
+     leg's live bid/ask mid price, not read from the chain's raw
+     `impliedVolatility` field** -- confirmed in production that field can
+     report SPY ATM IV in the low single digits (realistic SPY IV is
+     rarely below ~10%) for thin, near-expiry 0DTE contracts, which
+     silently suppressed magnitude estimates and, more importantly, could
+     flip the sign of the IV-skew signal used for direction. This affects
+     delta-based strike selection too (`app/data/market_data.py:leg_effective_iv`).
 
    Every prediction is checked ~30 minutes later against what SPY actually
    did (`PREDICTION_HORIZON_MINUTES` in `config.py`) and scored both on an

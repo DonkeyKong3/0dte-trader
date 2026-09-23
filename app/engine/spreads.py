@@ -25,7 +25,7 @@ from config import (
     TARGET_SHORT_DELTA,
     TZ,
 )
-from app.data.market_data import OptionLeg, OptionsChain, delta, implied_vol_from_price
+from app.data.market_data import OptionLeg, OptionsChain, delta, leg_effective_iv
 from app.engine.confidence import ConfidenceVerdict
 from app.engine.signals import SignalResult
 
@@ -36,12 +36,13 @@ def _round_to(value: float, base: float) -> float:
     return round(value / base) * base
 
 
-def _time_to_expiry_years(now: dt.datetime, expiration: str) -> float:
+def time_to_expiry_years(now: dt.datetime, expiration: str) -> float:
     """Years until 4pm ET on `expiration` (YYYY-MM-DD). Normally that's
     today (live 0DTE), but the demo/preview pipeline can pass a chain whose
     nearest expiration is a different, later date -- so this is computed
     from the chain's actual expiration rather than assumed to be `now`'s
-    own date."""
+    own date. Public so engine.py can reuse it for the prediction's IV
+    lookup without recomputing the same thing twice."""
     exp_date = dt.datetime.strptime(expiration, "%Y-%m-%d").date()
     close = dt.datetime.combine(exp_date, dt.time(16, 0), tzinfo=now.tzinfo)
     seconds_left = max((close - now).total_seconds(), 60)  # floor so BS math stays sane
@@ -49,9 +50,7 @@ def _time_to_expiry_years(now: dt.datetime, expiration: str) -> float:
 
 
 def _leg_delta(leg: OptionLeg, spot: float, t_years: float, is_call: bool) -> float | None:
-    iv = leg.implied_vol
-    if not iv or iv <= 0:
-        iv = implied_vol_from_price(leg.mid, spot, leg.strike, t_years, is_call, RISK_FREE_RATE)
+    iv = leg_effective_iv(leg, spot, t_years, is_call, RISK_FREE_RATE)
     if not iv:
         return None
     return delta(spot, leg.strike, t_years, iv, RISK_FREE_RATE, is_call)
@@ -75,13 +74,21 @@ def _find_leg_near_strike(legs: list[OptionLeg], strike: float) -> OptionLeg | N
     return min(legs, key=lambda leg: abs(leg.strike - strike))
 
 
-def atm_iv(chain: OptionsChain, spot: float) -> float | None:
-    """Average of the nearest-the-money call/put implied vol. Public so
-    prediction.py can reuse it for an IV-implied expected-move estimate,
-    independent of the directional signal score."""
+def atm_iv(chain: OptionsChain, spot: float, t_years: float) -> float | None:
+    """Average of the nearest-the-money call/put effective IV (solved from
+    live price, not the chain's raw field -- see leg_effective_iv). Public
+    so prediction.py can reuse it for an IV-implied expected-move estimate,
+    independent of the directional signal score. `t_years` is the OPTION's
+    actual time-to-expiry (needed to solve IV), not the prediction horizon
+    the caller may separately be projecting over."""
     call = _find_leg_near_strike(chain.calls, spot)
     put = _find_leg_near_strike(chain.puts, spot)
-    ivs = [leg.implied_vol for leg in (call, put) if leg and leg.implied_vol]
+    ivs = [
+        leg_effective_iv(leg, spot, t_years, is_call)
+        for leg, is_call in ((call, True), (put, False))
+        if leg
+    ]
+    ivs = [iv for iv in ivs if iv]
     if not ivs:
         return None
     return sum(ivs) / len(ivs)
@@ -332,7 +339,7 @@ def build_trade_card(
         return None
 
     spot = chain.underlying_price
-    t_years = _time_to_expiry_years(now, chain.expiration)
+    t_years = time_to_expiry_years(now, chain.expiration)
 
     if verdict.tradeable and verdict.direction in ("bullish", "bearish"):
         momentum = _signal(verdict.signals, "momentum")
@@ -368,7 +375,7 @@ def build_trade_card(
 
     # Not directionally tradeable -- check for an iron-condor (range-bound) setup.
     range_score = range_bound_score(verdict.signals)
-    iv_level = atm_iv(chain, spot)
+    iv_level = atm_iv(chain, spot, t_years)
     if not verdict.hard_block and range_score >= CONDOR_RANGE_SCORE_THRESHOLD and iv_level and iv_level >= CONDOR_MIN_IV:
         try:
             card = _iron_condor_card(ratio, chain, spot, t_years, range_score)

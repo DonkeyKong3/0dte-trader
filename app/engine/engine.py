@@ -33,7 +33,7 @@ from app.engine.prediction import (
     iv_expected_move_pct,
     predict_movement,
 )
-from app.engine.spreads import build_trade_card
+from app.engine.spreads import build_trade_card, time_to_expiry_years
 
 log = logging.getLogger(__name__)
 
@@ -41,12 +41,19 @@ PREDICTION_HORIZON_YEARS = (PREDICTION_HORIZON_MINUTES * 60) / (365 * 24 * 3600)
 
 
 def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: float | None, now: dt.datetime) -> dict:
+    # The option's actual time-to-expiry (till 4pm on the chain's
+    # expiration), needed to solve each leg's effective IV -- computed once
+    # and shared by iv_skew_signal and the prediction's expected-move
+    # estimate, distinct from PREDICTION_HORIZON_YEARS (how far ahead the
+    # prediction itself is projecting).
+    option_t_years = time_to_expiry_years(now, chain.expiration) if chain else None
+
     signal_list = [
         sig.trend_signal(bars),
         sig.momentum_signal(bars),
         sig.volume_signal(bars),
         sig.opening_range_signal(bars, OPENING_RANGE_MINUTES),
-        sig.iv_skew_signal(chain),
+        sig.iv_skew_signal(chain, quote_price, option_t_years),
     ]
 
     verdict = evaluate(signal_list, now)
@@ -55,7 +62,7 @@ def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: f
     # Magnitude evidence for the prediction, independent of the directional
     # signal vote: prefer the options market's own IV-implied expected move,
     # fall back to realized ATR when there's no usable chain.
-    expected_move_pct = iv_expected_move_pct(chain, quote_price, PREDICTION_HORIZON_YEARS)
+    expected_move_pct = iv_expected_move_pct(chain, quote_price, option_t_years, PREDICTION_HORIZON_YEARS)
     magnitude_source = "iv"
     if expected_move_pct is None:
         expected_move_pct = atr_expected_move_pct(bars, quote_price, PREDICTION_HORIZON_MINUTES)

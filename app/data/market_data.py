@@ -239,3 +239,23 @@ def delta(spot: float, strike: float, t_years: float, vol: float, rate: float, i
         return None
     d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * t_years) / (vol * math.sqrt(t_years))
     return _norm_cdf(d1) if is_call else _norm_cdf(d1) - 1
+
+
+def leg_effective_iv(leg: OptionLeg, spot: float, t_years: float, is_call: bool, rate: float = 0.05) -> float | None:
+    """The IV to actually use for a leg: prefers solving from its live
+    bid/ask mid price (internally consistent with the fresh quote we just
+    pulled) over the chain's raw `impliedVolatility` field.
+
+    Confirmed in production on an ordinary SPY session: the raw field was
+    reporting ATM IV around 2-5% annualized, when realistic SPY IV is
+    rarely below ~10% -- a same-day options data-quality issue (Yahoo's
+    IV is frequently stale/unstable for thin, near-expiry 0DTE contracts),
+    not a market condition. That silently capped every magnitude-dependent
+    calculation (expected move, delta-based strike selection, IV skew)
+    far below where it should be. Falls back to the raw field only when
+    there's no usable quote to solve from."""
+    if leg.mid > 0 and t_years and t_years > 0:
+        solved = implied_vol_from_price(leg.mid, spot, leg.strike, t_years, is_call, rate)
+        if solved:
+            return solved
+    return leg.implied_vol if leg.implied_vol and leg.implied_vol > 0 else None
