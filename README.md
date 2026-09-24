@@ -87,6 +87,14 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
      silently suppressed magnitude estimates and, more importantly, could
      flip the sign of the IV-skew signal used for direction. This affects
      delta-based strike selection too (`app/data/market_data.py:leg_effective_iv`).
+     **The price-solve itself is floored to at least 15 minutes of
+     time-to-expiry** -- solving IV gets extremely sensitive to tiny quote
+     residuals (a stale tick, a one-cent bid/ask spread) as real time-to-
+     expiry approaches zero; confirmed in production, expected-move
+     readings climbed to implying 100%+ annualized SPY IV in the closing
+     minutes of a session without the floor. The floor only stabilizes the
+     vol *input*; delta and the expected-move scaling still use the real,
+     unfloored time remaining.
 
    Every prediction is checked ~30 minutes later against what SPY actually
    did (`PREDICTION_HORIZON_MINUTES` in `config.py`) and scored both on an

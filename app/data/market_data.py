@@ -241,6 +241,21 @@ def delta(spot: float, strike: float, t_years: float, vol: float, rate: float, i
     return _norm_cdf(d1) if is_call else _norm_cdf(d1) - 1
 
 
+# Floor on the time input to the IV solve specifically (NOT on the real
+# t_years used elsewhere -- delta, expected-move scaling, force-close
+# timing). As real time-to-expiry approaches zero, BS price becomes
+# extremely sensitive to vol, so any small residual between a live quote
+# and the current spot (a stale tick, a one-cent bid/ask spread, tick-size
+# rounding) forces the solver to attribute it all to vol -- confirmed in
+# production: expected-move estimates climbed from a realistic ~0.13% at
+# midday to ~0.78% (implying >100% annualized IV) in the last minute of
+# the session, a numerical artifact of solving IV that close to expiry,
+# not a real market condition. Clamping the solve's time input to at
+# least 15 minutes damps that sensitivity by ~10x while still using the
+# option's real, current-day price.
+_MIN_T_YEARS_FOR_IV_SOLVE = (15 * 60) / (365 * 24 * 3600)
+
+
 def leg_effective_iv(leg: OptionLeg, spot: float, t_years: float, is_call: bool, rate: float = 0.05) -> float | None:
     """The IV to actually use for a leg: prefers solving from its live
     bid/ask mid price (internally consistent with the fresh quote we just
@@ -255,7 +270,8 @@ def leg_effective_iv(leg: OptionLeg, spot: float, t_years: float, is_call: bool,
     far below where it should be. Falls back to the raw field only when
     there's no usable quote to solve from."""
     if leg.mid > 0 and t_years and t_years > 0:
-        solved = implied_vol_from_price(leg.mid, spot, leg.strike, t_years, is_call, rate)
+        solve_t_years = max(t_years, _MIN_T_YEARS_FOR_IV_SOLVE)
+        solved = implied_vol_from_price(leg.mid, spot, leg.strike, solve_t_years, is_call, rate)
         if solved:
             return solved
     return leg.implied_vol if leg.implied_vol and leg.implied_vol > 0 else None

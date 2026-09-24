@@ -10,7 +10,7 @@ the raw field only when there's no usable price to solve from.
 """
 import pytest
 
-from app.data.market_data import OptionLeg, OptionsChain, bs_price, leg_effective_iv
+from app.data.market_data import OptionLeg, OptionsChain, bs_price, implied_vol_from_price, leg_effective_iv
 from app.engine.signals import iv_skew_signal
 from app.engine.spreads import atm_iv
 
@@ -62,6 +62,29 @@ def test_iv_skew_signal_uses_price_solved_iv_not_bogus_raw_field():
     result = iv_skew_signal(chain, spot, t_years)
 
     assert result.direction == "bearish"
+
+
+def test_leg_effective_iv_clamps_near_expiry_solve_instability():
+    """Regression test for the second bug the production export surfaced:
+    as real t_years approaches zero, BS price becomes so sensitive to vol
+    that a modest quote residual (stale tick, bid/ask spread, rounding)
+    forces the solver to an implausible vol. Confirmed in production:
+    expected-move readings climbed from a realistic ~0.13% at midday to
+    ~0.78% (implying >100% annualized SPY IV) in the last minute of the
+    session -- a numerical artifact of solving that close to expiry, not
+    a real market condition."""
+    spot = strike = 500.0
+    t_1min = 60 / (365 * 24 * 3600)
+    noisy_price = 0.20  # a few-cent residual, easily plausible live quote noise
+
+    leg = OptionLeg(strike=strike, bid=noisy_price, ask=noisy_price, last=noisy_price, volume=10, open_interest=10, implied_vol=None)
+
+    unclamped = implied_vol_from_price(noisy_price, spot, strike, t_1min, True, RATE)
+    clamped = leg_effective_iv(leg, spot, t_1min, is_call=True, rate=RATE)
+
+    assert unclamped > 0.5  # confirms this scenario genuinely blows up without the floor
+    assert clamped is not None
+    assert clamped < 0.30  # the floor keeps it in a plausible range
 
 
 def test_iv_skew_signal_without_spot_or_t_years_falls_back_to_raw_field():
