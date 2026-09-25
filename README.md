@@ -27,7 +27,13 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
    - **IV skew** -- put vs call implied vol near the money (hedging demand)
 3. **Confidence gating.** Signals are combined into a single weighted score
    (weights in `config.py`). A trade is only ever suggested when:
-   - the score clears `CONFIDENCE_THRESHOLD` (default 70/100), **and**
+   - the score clears `CONFIDENCE_THRESHOLD` (default 60/100 -- lowered
+     from 70 after a week of production data showed zero directional
+     trades firing, including real opening-range breakouts where momentum/
+     volume simply never confirmed and confidence stalled around 23/70;
+     the weighted-sum math means clearing 70 needs close to all 5 signals
+     aligned at once, a much rarer joint condition than "a move is
+     happening"), **and**
    - we're not inside a blackout window around a high-impact economic
      event (FOMC, CPI, NFP, PCE, ISM, weekly jobless claims -- see
      `app/data/economic_calendar.py`), **and**

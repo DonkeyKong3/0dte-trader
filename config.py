@@ -22,7 +22,17 @@ POLL_INTERVAL_SECONDS = 60
 
 # --- Confidence gating ---
 # Weighted signal score must clear this (0-100) before a trade is suggested at all.
-CONFIDENCE_THRESHOLD = 70
+# `weighted_direction_scores` only sums weight from signals that already
+# agree with the leading direction, so reaching a given threshold requires
+# roughly that many points' worth of signals aligned strongly at once --
+# with weights trend=25/momentum=20/volume=20/opening_range=15/iv_skew=20,
+# 70 requires close to all 5 signals confirming simultaneously. Lowered
+# from 70 -> 60 after zero directional trades fired across a week of
+# production data, including two real opening-range breakouts (strength
+# 100, a genuine move) where momentum/volume simply never confirmed and
+# confidence stalled at ~23/70 -- the bar was requiring near-total
+# agreement, not just a couple of signals actually pointing the same way.
+CONFIDENCE_THRESHOLD = 60
 # Individual signal weights (must sum to 100)
 SIGNAL_WEIGHTS = {
     "trend": 25,

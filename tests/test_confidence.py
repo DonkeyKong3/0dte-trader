@@ -26,7 +26,7 @@ def _all_neutral():
 
 def _strong_bullish():
     # Weighted sum (trend 25*1.0 + momentum 20*0.95 + volume 20*0.9 +
-    # opening_range 15*0.8 = 74) clears CONFIDENCE_THRESHOLD (70).
+    # opening_range 15*0.8 = 74) clears CONFIDENCE_THRESHOLD.
     return [
         SignalResult("trend", "bullish", 100, "aligned up"),
         SignalResult("momentum", "bullish", 95, "RSI hot"),
