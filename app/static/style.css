@@ -138,11 +138,18 @@ th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size
 .table-scroll {
   max-height: 360px;
   overflow-y: auto;
+  overflow-x: auto;
 }
 .table-scroll thead th {
   position: sticky;
   top: 0;
   background: var(--panel);
+}
+#tradesTable {
+  min-width: 920px; /* enough columns (position/entry/exit/confidence) that it needs horizontal scroll on narrow screens */
+}
+#tradesTable td, #tradesTable th {
+  white-space: nowrap;
 }
 
 button {

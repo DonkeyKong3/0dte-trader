@@ -33,6 +33,16 @@ function renderStrikes(card) {
   return `Short ${card.short_strike} / Long ${card.long_strike}`;
 }
 
+// Same shape as renderStrikes, but for a tracked-trade row -- the trades
+// table stores strikes as flat columns (short_strike/long_strike or the
+// four condor legs), not nested under a "card" like a live suggestion.
+function renderTradePosition(t) {
+  if (t.strategy === "iron_condor") {
+    return `Put ${t.put_long_strike}/${t.put_short_strike} &nbsp;|&nbsp; Call ${t.call_short_strike}/${t.call_long_strike}`;
+  }
+  return `Short ${t.short_strike} / Long ${t.long_strike}`;
+}
+
 function predictionHtml(prediction, hindsight) {
   if (!prediction) {
     return `<div class="sub">Predicted movement not available yet.</div>`;
@@ -198,7 +208,7 @@ async function renderTrades() {
     const res = await fetch("/api/trades?limit=200");
     const rows = await res.json();
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="6">No tracked trades yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11">No tracked trades yet.</td></tr>`;
       return;
     }
     tbody.innerHTML = rows
@@ -207,16 +217,21 @@ async function renderTrades() {
         const notes = (t.reason_tags || []).map((r) => `<li>${r}</li>`).join("");
         return `<tr>
           <td>${fmtTime(t.opened_at)}</td>
+          <td>${t.resolved_at ? fmtTime(t.resolved_at) : "--"}</td>
           <td>${STRATEGY_LABELS[t.strategy] || t.strategy}</td>
+          <td>${renderTradePosition(t)}</td>
+          <td>${fmtMoney(t.entry_price)}</td>
+          <td>${t.exit_price != null ? fmtMoney(t.exit_price) : "--"}</td>
           <td><span class="pill ${t.status}">${t.status}</span></td>
           <td>${t.exit_reason_code || "--"}</td>
           <td class="${pnlClass}">${t.pnl != null ? fmtMoney(t.pnl) : "--"}</td>
+          <td>${t.confidence_score != null ? t.confidence_score.toFixed ? t.confidence_score.toFixed(1) : t.confidence_score : "--"}</td>
           <td>${notes ? `<ul class="notes-list">${notes}</ul>` : "--"}</td>
         </tr>`;
       })
       .join("");
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6">Could not load tracked trades.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11">Could not load tracked trades.</td></tr>`;
   }
 }
 

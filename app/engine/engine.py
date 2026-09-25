@@ -76,10 +76,22 @@ def _analyze(bars, quote_price: float, quote_as_of: dt.datetime, chain, ratio: f
     if card is None and verdict.tradeable:
         reasons.append("Confident direction found, but no usable options chain/strikes to build a spread")
 
+    # The score shown alongside this cycle's verdict must be the score that
+    # actually gated whatever's being shown. For a directional card these
+    # are the same number (card.confidence_score == round(verdict.score, 1)),
+    # but an iron condor is gated on range_bound_score, a completely
+    # different score from verdict.score (verdict.score is necessarily
+    # BELOW CONFIDENCE_THRESHOLD whenever a condor fires -- that's exactly
+    # why the directional branch was skipped). Recording verdict.score here
+    # regardless of card type made the signal-history table show a low
+    # "score" next to a suggested Iron Condor, looking like the suggestion
+    # contradicted its own listed confidence.
+    display_score = card.confidence_score if card else round(verdict.score, 1)
+
     return {
         "tradeable": card is not None,
         "direction": card.direction if card else "none",
-        "score": round(verdict.score, 1),
+        "score": display_score,
         "card": card_dict,
         "reasons": reasons,
         "signals": [dataclasses.asdict(s) for s in signal_list],
