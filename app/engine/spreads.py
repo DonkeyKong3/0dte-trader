@@ -198,7 +198,12 @@ class TradeCard:
     data_as_of: str = ""
     note: str = (
         "Strikes/premiums are estimates scaled from the SPY 0DTE chain via the live "
-        "SPX/SPY ratio. Confirm against a live SPX quote before entering."
+        "SPX/SPY ratio. Confirm against a live SPX quote before entering. Profit "
+        "target and stop loss are TRIGGER levels, not guaranteed fills -- the paper "
+        "tracker only re-checks prices once per 60-second poll, so the actual exit "
+        "can land past the stated level in either direction (confirmed in "
+        "production: realized stop-loss exits have run up to ~45% beyond the "
+        "stated stop). A real broker order would behave differently."
     )
 
 

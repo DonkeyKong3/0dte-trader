@@ -61,7 +61,15 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
    target, a stop loss, and a hard time-based force-close -- because the
    app has no brokerage connection and can't know if/when you actually
    opened the position, these are the rules to manage it by rather than a
-   live "close now" push.
+   live "close now" push. These are TRIGGER prices, not guaranteed fills:
+   the paper tracker only re-checks prices once per 60-second poll, so the
+   actual exit can land past the stated level in either direction.
+   Confirmed in production: realized stop-loss exits have run up to ~45%
+   beyond the stated stop (and, symmetrically, some profit-target exits
+   have landed better than the stated target) -- both are the same
+   polling-interval effect, just cutting the opposite way depending on
+   which direction price was already moving. A real broker order would
+   behave differently.
 6. **Track record.** Every confident card is also paper-tracked: at most
    one open "trade" at a time, re-priced against the live options chain
    every poll cycle, and automatically resolved (won/lost) the moment it
@@ -211,6 +219,13 @@ and never go stale.
   broker fill would have done (slippage, bid/ask timing), but it's
   consistent with itself, so win-rate trends over time are meaningful
   even if any single trade's exact dollar P&L isn't execution-grade.
+- **Stop-loss/profit-target are trigger levels, not guaranteed fills.**
+  Prices are only re-checked once per 60-second poll, so the actual paper
+  exit can land past the stated level -- confirmed in production, up to
+  ~45% beyond the stated stop-loss on the worst observed case (profit
+  targets see the same effect in the trader's favor). Treat the card's
+  max-loss figure as a design target the stop aims for, not a hard floor
+  this paper tracker enforces to the cent.
 - **Only one trade tracked at a time.** If the engine stays confident
   across several poll cycles, that's treated as the same suggestion, not
   a new one each time -- otherwise win-rate stats would double-count a
