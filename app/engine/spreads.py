@@ -13,6 +13,7 @@ import datetime as dt
 from dataclasses import dataclass, field
 
 from config import (
+    CONDOR_MAX_SIGNAL_STRENGTH,
     CONDOR_MIN_IV,
     CONDOR_RANGE_SCORE_THRESHOLD,
     CONDOR_SPREAD_WIDTH_SPX,
@@ -159,6 +160,19 @@ def range_bound_score(signals: list[SignalResult]) -> float:
         quietness = 100.0 if sig.direction == "neutral" else max(0.0, 100 - sig.strength)
         score += weight * (quietness / 100)
     return score / total_weight * 100
+
+
+def max_directional_signal_strength(signals: list[SignalResult]) -> float:
+    """Highest strength among the range-relevant signals that are actually
+    directional (a neutral reading already counts as full quietness in
+    range_bound_score, so it's excluded here). A WEIGHTED AVERAGE can still
+    clear the range_bound_score threshold even when one signal is genuinely
+    strong, as long as the others are quiet enough to average it out -- this
+    is a separate, per-signal check so a single strong signal can veto
+    condor eligibility on its own, regardless of the average."""
+    relevant = ("trend", "momentum", "volume", "opening_range")
+    strengths = [s.strength for s in signals if s.name in relevant and s.direction != "neutral"]
+    return max(strengths) if strengths else 0.0
 
 
 @dataclass
@@ -375,8 +389,15 @@ def build_trade_card(
 
     # Not directionally tradeable -- check for an iron-condor (range-bound) setup.
     range_score = range_bound_score(verdict.signals)
+    genuinely_quiet = max_directional_signal_strength(verdict.signals) <= CONDOR_MAX_SIGNAL_STRENGTH
     iv_level = atm_iv(chain, spot, t_years)
-    if not verdict.hard_block and range_score >= CONDOR_RANGE_SCORE_THRESHOLD and iv_level and iv_level >= CONDOR_MIN_IV:
+    if (
+        not verdict.hard_block
+        and genuinely_quiet
+        and range_score >= CONDOR_RANGE_SCORE_THRESHOLD
+        and iv_level
+        and iv_level >= CONDOR_MIN_IV
+    ):
         try:
             card = _iron_condor_card(ratio, chain, spot, t_years, range_score)
         except ValueError:

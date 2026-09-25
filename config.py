@@ -49,7 +49,17 @@ DEBIT_STOP_LOSS_FRACTION = 0.5    # close debit spreads if premium drops 50%
 DEBIT_PROFIT_TARGET_FRACTION = 0.75  # close debit spreads at +75% premium gain
 
 # --- Iron condor (range-bound) eligibility ---
-CONDOR_RANGE_SCORE_THRESHOLD = 70   # how "quiet" the market must look (0-100)
+# range_bound_score is a WEIGHTED AVERAGE of quietness across the 4 non-IV
+# signals, so a single genuinely strong signal can still be averaged away
+# by three quiet ones -- e.g. one strongly trending signal (strength 90)
+# alongside three flat ones still clears a 70 threshold on the average
+# alone. Raised from 70 -> 80 (higher average bar) and paired with
+# CONDOR_MAX_SIGNAL_STRENGTH (a hard per-signal cap, independent of the
+# average) after production data showed the model favoring iron condors
+# far more often than directional spreads -- both changes make "quiet"
+# require genuinely quiet, not just "nothing strong on average."
+CONDOR_RANGE_SCORE_THRESHOLD = 80   # how "quiet" the market must look on average (0-100)
+CONDOR_MAX_SIGNAL_STRENGTH = 50     # no single directional signal may exceed this strength
 CONDOR_MIN_IV = 0.10                # minimum ATM annualized IV to bother selling premium
 TARGET_SHORT_DELTA = 0.18           # standard 0DTE credit-spread short-leg delta
 

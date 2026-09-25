@@ -46,7 +46,17 @@ does not place or manage trades.** See [Disclaimer](#disclaimer).
    When *not* directionally confident but trend/momentum/volume/opening-range
    all read quiet **and** implied vol is rich enough to be worth selling,
    it separately evaluates an **iron condor** -- its own confidence check,
-   not a fallback for "couldn't decide."
+   not a fallback for "couldn't decide." "Quiet" requires two things to
+   both hold, not just one: the weighted-average range-bound score clears
+   `CONDOR_RANGE_SCORE_THRESHOLD` (default 80/100), **and** no single one
+   of those signals individually exceeds `CONDOR_MAX_SIGNAL_STRENGTH`
+   (default 50). The second check exists because a weighted average alone
+   can be misleading -- one genuinely strong, directional signal can still
+   be averaged away by three quiet ones and clear the average threshold on
+   its own, which in production made the model favor iron condors far more
+   often than directional spreads (the directional gate requires several
+   signals to actually agree strongly, a much higher bar than "nothing
+   strong on average").
 5. **Exit rules, given up front.** Every trade card ships with a profit
    target, a stop loss, and a hard time-based force-close -- because the
    app has no brokerage connection and can't know if/when you actually
